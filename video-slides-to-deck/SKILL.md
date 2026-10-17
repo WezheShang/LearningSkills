@@ -8,11 +8,18 @@ description: |
   burned-in subtitles for that time span. Use when the user wants to read a
   slide-lecture video as notes ("把这个视频转成图文/PPT/要点", "video to deck",
   "summarise this lecture video", "turn this course video into notes").
-  Do NOT use for: talking-head or vlog footage, screen recordings, fast-cut
-  montage, animation or motion-graphics videos, anything with no narration, or
-  any video where the speech does not correspond to what is on screen -- see
-  references/README.md for the full applicability matrix, and confirm the fit
-  BEFORE running.
+  Do NOT use for: talking-head or vlog footage, fast-cut montage, animation or
+  motion-graphics videos, anything with no narration, or any video where the
+  speech does not correspond to what is on screen -- see references/README.md
+  for the full applicability matrix, and confirm the fit BEFORE running.
+  Exception: two non-slide categories still have supported paths here.
+  (1) Progressive-annotation screen recordings -- someone drawing on a live
+  chart or diagram while narrating -- are neither static slides nor montage;
+  split them by topic, not by scene, and pick frames with
+  `scripts/pick_annotated_frame.py`. (2) Recordings whose frames carry no
+  information at all still have a text-first branch
+  (`scripts/srt_segmap.py` + `scripts/build_notes.py`) that skips screenshots
+  entirely. Both branches reuse the same renderer.
 ---
 
 # Video (slide lecture) -> illustrated HTML deck
@@ -25,8 +32,19 @@ Confirm these before running anything; a wrong assumption here invalidates the w
 2. **Is it a static-slide lecture?** Look at 3–4 frames spread across the video.
    The test: does the frame hold a slide-like layout (title, bullets, diagram,
    chart) while the narration moves on? Read the applicability matrix in
-   `references/README.md`; if it is a talking head, a screen recording, or
-   fast-cut footage, stop and tell the user this pipeline does not fit.
+   `references/README.md`; if it is a talking head or fast-cut footage, stop and
+   tell the user this pipeline does not fit. If it is a screen recording, do not
+   conclude either way from three or four frames — go to step 2a first.
+2a. **Screen recordings need a cheap full-runtime look, not a few frames.**
+   Three or four hand-picked timestamps can all land on the same app state and
+   make a visibly-changing video look frozen. When a platform offers a storyboard
+   sprite, fetch it: bilibili's
+   `https://api.bilibili.com/x/player/videoshot?aid=<aid>&cid=<cid>&index=1`
+   returns one JPEG holding 45–100 keyframes spread across the whole runtime. A
+   single `read` of that image decides whether the frames carry information, and
+   it costs nothing. Getting this wrong in the dangerous direction is worse than
+   being slow: it silently justifies shipping a text-only page for a video whose
+   screenshots would have taught the lesson.
 3. **Is there burned-in narration?** The whole point of the subtitle band is to
    recover what was said. If the video is silent, or the captions are absent and
    unobtainable, stop — you cannot write the summaries without the speech.
@@ -100,6 +118,83 @@ them before committing to a full run.
 
 Do not produce a .pptx. The HTML is the deliverable.
 
+## Branch B — topic-split notes (screen recordings and other non-slide video)
+
+Branch A above is the default. Use this branch when the frame check said "not a
+slide deck" **but** the video has real subtitles worth reading. Two sub-cases,
+and which one you are in decides whether screenshots appear:
+
+- **Progressive annotation** — someone drawing on a live chart/diagram while
+  narrating. The picture *is* the lesson. Go to `pick_annotated_frame.py` below.
+- **Uninformative frames** — a static app window, a mostly-dark demo, talking
+  head over screen. Skip screenshots entirely; the page is prose.
+
+**Do not run `pipeline.py` on either.** Scene detection is wrong in both
+directions: on an annotated screen recording every frame differs (a pen stroke
+was just added) so the noise floor swamps the real boundaries, and on a static
+window it finds nothing useful (a floating app window opening scores a perfect
+1.0). Split by topic instead — that is what the speaker is actually doing.
+
+The gate between the two sub-cases is step 2a above. Decide it with the storyboard
+sprite, not with a handful of hand-picked frames.
+
+1. **Get the subtitles.** Official CC tracks beat burned-in OCR. On bilibili,
+   `yt-dlp --list-subs` returns `subtitles: []` when logged out — that is a login
+   wall, not proof of absence. Re-check with a cookie file containing
+   `SESSDATA`, or call `https://api.bilibili.com/x/player/wbi/v2?aid=<aid>&cid=<cid>`
+   with the same cookie. Full method and both cookie-extraction failure modes:
+   `references/README.md`.
+
+2. **Split by topic, not by scene.** Read the transcript and pick 6–12 cut
+   times in seconds where the topic turns, then:
+
+   ```powershell
+   python scripts/srt_segmap.py sub.srt --out segmap.json --cuts 118,258,394,534
+   ```
+
+   It assigns every cue exactly once and prints a per-segment line count so you
+   can see a bad cut immediately. Cuts are numbers, not anchor strings: AI
+   subtitle tracks (`ai-zh`) contain homophone errors, so text matching misses
+   silently and shifts boundaries.
+
+2b. **Pick frames (annotated sub-case only).**
+
+   ```powershell
+   python scripts/pick_annotated_frame.py video.mp4 --segmap segmap.json --out frames
+   ```
+
+   It samples ~8 frames per segment and keeps the one carrying the most drawing.
+   Scoring is two-tier on purpose: frames whose background is dark (a chart
+   window) are ranked by bright-mark density, and only a segment that is *entirely*
+   a light mind-map panel falls back to red-ink density. Sharing one score across
+   both window types saturates — a white panel reads as ~50% "ink" no matter how
+   little is drawn on it, which silently ranks every panel frame equal. Measured
+   on a real 16-minute series: 7 of 8 segments resolve to chart frames, and the
+   intro legitimately stays on the panel.
+
+   Then **look at every frame you picked** before writing its caption.
+
+3. **Write `notes.json`** — titles, self-sufficient summaries (same standard as
+   step 3 above), core points, meta, and `note_paragraphs` telling the reader how
+   the page was made. For the annotated sub-case give each section an `image` and
+   a `caption` describing what is actually visible in that frame (how many marks,
+   where the polyline connects, what number is written beside it). For the
+   uninformative sub-case omit `image` everywhere and keep only any one genuinely
+   useful picture (a course map, a worked example) in `assets`.
+
+4. **Render and verify.**
+
+   ```powershell
+   python scripts/build_notes.py --segmap segmap.json --notes notes.json --out notes.html --root .
+   ```
+
+   It exits non-zero and writes nothing if any segment lacks a section, a
+   section has no subtitle lines, an asset is missing, or segments overlap —
+   so a batch run cannot silently ship a half-written page. It warns (not
+   fails) on a summary under `--min-summary` (default 80 chars), because that is
+   the "restates the title" failure mode rather than a structural error. Load
+   the result and read two sections before calling it done.
+
 ## Failure handling
 
 - **`selftest.py` reports `cut_recall 0.00`** → the threshold is above every real
@@ -128,6 +223,18 @@ Do not produce a .pptx. The HTML is the deliverable.
   `<out>/substrips/subNNN.png` directly.
 - **A segment's subtitle list is empty while others are fine** → that time span
   had no caption on screen. Accept it, or merge it into the neighbour.
+- **`srt_segmap.py` reports `assigned N/M` with N < M** → a cue started before
+  the first cut or landed exactly on a boundary. Re-check the cut list; the
+  first cut must be > 0 and below the last cue's end time.
+- **`srt_segmap.py` warns that a segment has 0 lines** → two cuts sit too close
+  together, or one falls outside the speech. Widen that boundary.
+- **`build_notes.py` exits 1 with `segment sNN has no entry`** → you wrote fewer
+  sections than the segment map has segments. Add the missing one; a blank
+  section is worse than merging two adjacent segments in `notes.json` (drop the
+  cut and re-run `srt_segmap.py`).
+- **`build_notes.py` warns about a short summary** → treat it as a real defect.
+  The page is only worth reading if each section stands alone; rewrite the
+  summary instead of lowering `--min-summary`.
 
 ## Windows (win32) platform notes
 
