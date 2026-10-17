@@ -39,7 +39,6 @@
 ### 判断方法（动手前先做）
 
 抽 3–4 帧，跨整个视频时间轴（比如 10% / 40% / 70% / 90%），然后问两个问题：
-
 ```powershell
 ffmpeg -y -ss 60 -i video.mp4 -frames:v 1 f1.png
 ffmpeg -y -ss 200 -i video.mp4 -frames:v 1 f2.png
@@ -51,6 +50,43 @@ ffmpeg -y -ss 200 -i video.mp4 -frames:v 1 f2.png
    没有字幕 → 先确认能不能拿到音轨/官方字幕；都拿不到就**不适用**。
 
 两个都满足 → 跑。有任何一条不满足 → 停下来说明，不要硬跑。
+
+### ⚠️ 别把「工具拿不到」当成「事实不存在」
+
+抽帧只能看到**烧录字幕**（像素里就有的）。B站还有一整类字幕是**官方 CC 轨**——
+由播放器单独下发、前端叠加渲染，**永远不会出现在视频帧里**。这两者必须分开判断。
+
+最要命的坑：**yt-dlp 在未登录时对 B站返回 `subtitles: []`，但这不是"这个视频没有字幕"，
+而是"CC 轨需要登录态"。** 我曾据此判了一个 43 P 缠论课程合集"全部无字幕、不适用"，
+而实际上带 cookie 后 43/43 都有 `ai-zh` 轨。判"无字幕"之前必须先排掉这个。
+
+正确查法（`cookies` 指向 Netscape 格式的 cookie 文件，里面要有 `SESSDATA`）：
+
+```powershell
+yt-dlp --cookies "C:\path\cookies.txt" --list-subs "<url>"      # 先列轨道
+yt-dlp --cookies "C:\path\cookies.txt" --skip-download \
+       --write-sub --sub-langs "ai-zh,zh-*" --sub-format srt \
+       -o "sub.%(ext)s" "<url>"                                   # 再下载
+```
+
+拿不到 cookie 时，浏览器在运行 → `--cookies-from-browser chrome` 会报
+`Could not copy Chrome cookie database`（库被锁）；Edge 则报
+`Failed to decrypt with DPAPI`（新版应用绑定加密 yt-dlp 解不开）。这时可以直接调
+`https://api.bilibili.com/x/player/wbi/v2?aid=<aid>&cid=<cid>`，
+**带 SESSDATA cookie 请求**，`code` 会是 0（成功）而不是报错——空列表只说明没登录。
+
+### 拿到官方字幕后：有字幕 ≠ 该走图文管线
+
+拿到字幕只解决了"内容来源"。**还要单独判断截图有没有信息量。**
+判据很直接：抽 4–6 帧跨全片比一比，**如果画面基本不变，那配图就是装饰**。
+实测一个 mindmap 屏幕录像的课程合集：全片 16 分钟 7 帧几乎逐像素相同，
+而且那张图讲的内容还跟本集主题对不上——这种视频只能出**纯文字版笔记**，
+硬套图文管线只会得到一堆一样的截图配编出来的总结。
+
+纯文字版怎么做：跳过 `pipeline.py` 的第 ④ 步，直接把下载到的 SRT **按话题分段**
+（用锚点句切，不靠场景分），再改写成自足总结。官方字幕是作者/平台生成的时间轴文本，
+质量通常远好于烧录字幕 OCR，但 **AI 生成轨（`ai-zh`）会有同音错字**，
+锚点匹配要用短且 distinctive 的片段，长句容易匹配不上。
 
 ---
 
