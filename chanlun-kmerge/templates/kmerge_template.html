@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>缠论 K 线合并练习</title>
+<style>
+  :root{
+    --bg:#0a0e15; --panel:#11161f; --panel2:#151b26; --bd:#1e2634; --bd2:#2a3444;
+    --tx:#93a1b5; --txs:#dfe6f0; --up:#f3453f; --dn:#0ecb81;
+    --acc:#ffb020; --sel:#3d7eff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--tx); overflow:hidden;
+    font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    font-size:13px; -webkit-font-smoothing:antialiased;
+  }
+  .app{display:flex; flex-direction:column; height:100vh}
+
+  .bar{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--bd);
+    flex:0 0 auto;
+  }
+  .brand{font-weight:700; color:var(--txs); letter-spacing:.5px; white-space:nowrap}
+  .brand em{font-style:normal; color:var(--acc)}
+
+  button,select{
+    background:var(--panel2); color:var(--txs); border:1px solid var(--bd2);
+    border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer;
+    font-family:inherit; line-height:1.4; transition:.12s;
+  }
+  button:hover,select:hover{border-color:#3d4a5e; background:#1b2230}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.35; cursor:not-allowed}
+  .seg{display:inline-flex; border:1px solid var(--bd2); border-radius:6px; overflow:hidden}
+  .seg button{border:0; border-radius:0; background:transparent; padding:5px 12px}
+  .seg button+button{border-left:1px solid var(--bd2)}
+  .seg button.on{background:#25406e; color:#fff}
+  .spacer{flex:1 1 auto}
+  .stat{color:var(--tx); font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .stat b{color:var(--txs); font-weight:600}
+  .stat .m{color:var(--acc)}
+
+  .wrap{position:relative; flex:1 1 auto; min-height:0}
+  canvas{display:block; width:100%; height:100%; cursor:crosshair}
+
+  .tip{
+    position:absolute; pointer-events:none; z-index:5; display:none;
+    background:rgba(12,17,25,.94); border:1px solid var(--bd2); border-radius:7px;
+    padding:8px 10px; font-size:12px; color:var(--txs); min-width:186px;
+    box-shadow:0 8px 26px rgba(0,0,0,.55); font-variant-numeric:tabular-nums;
+  }
+  .tip .r{display:flex; justify-content:space-between; gap:14px; line-height:1.65}
+  .tip .r span:first-child{color:var(--tx)}
+  .tip .hd{font-weight:700; margin-bottom:4px; padding-bottom:4px; border-bottom:1px solid var(--bd)}
+  .tip .mg{color:var(--acc); font-size:11px; margin-top:4px}
+  .up{color:var(--up)} .dn{color:var(--dn)} .am{color:var(--acc)}
+
+  .foot{
+    flex:0 0 auto; display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+    padding:6px 12px; background:var(--panel); border-top:1px solid var(--bd);
+    font-size:11.5px; color:#6f7d91;
+  }
+  .foot kbd{
+    background:#1c2431; border:1px solid var(--bd2); border-bottom-width:2px;
+    border-radius:4px; padding:0 5px; color:var(--txs); font-size:11px;
+    font-family:ui-monospace,Consolas,monospace;
+  }
+
+  .mask{position:fixed; inset:0; background:rgba(4,7,12,.72); z-index:20;
+        display:none; align-items:center; justify-content:center}
+  .mask.on{display:flex}
+  .modal{
+    background:var(--panel); border:1px solid var(--bd2); border-radius:12px;
+    padding:20px 22px; max-width:620px; width:calc(100% - 40px); max-height:82vh; overflow:auto;
+  }
+  .modal h3{color:var(--txs); font-size:15px; margin-bottom:12px}
+  .modal table{width:100%; border-collapse:collapse; font-size:12.5px}
+  .modal td{padding:4px 6px; border-bottom:1px solid #1a2130; vertical-align:top}
+  .modal td:first-child{width:190px; color:var(--txs); white-space:nowrap}
+  .modal td:last-child{color:var(--tx)}
+  .modal .x{margin-top:14px; text-align:right}
+  .note{margin-top:10px; padding:9px 11px; background:#141b26; border-left:3px solid var(--acc);
+        border-radius:0 6px 6px 0; color:#a9b6c8; font-size:12px; line-height:1.7}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <div class="brand">缠论 <em>K线合并</em> 练习</div>
+    <select id="idxSel" title="选择指数"></select>
+    <div class="seg" id="freqSeg">
+      <button data-f="D" class="on">日K</button>
+      <button data-f="W">周K</button>
+    </div>
+    <div class="seg" id="dirSeg" title="处理方向：默认按缠论规则自动判定（新K线高点 vs 前一根高点）">
+      <button data-d="auto" class="on">自动</button>
+      <button data-d="up">向上 ⇅</button>
+      <button data-d="down">向下 ⇇</button>
+    </div>
+    <select id="rangeSel" title="显示根数">
+      <option value="60">近 60 根</option>
+      <option value="90">近 90 根</option>
+      <option value="120" selected>近 120 根</option>
+      <option value="250">近 250 根</option>
+      <option value="500">近 500 根</option>
+      <option value="1000">近 1000 根</option>
+    </select>
+    <button id="undoBtn" title="撤销 (Ctrl+Z)">↶ 撤销</button>
+    <button id="redoBtn" title="重做 (Ctrl+Y)">↷ 重做</button>
+    <button id="resetBtn" title="还原本次练习的全部合并">重置练习</button>
+    <button id="doneBtn" title="检查还有没有需要合并的包含关系（F）">✅ 完成检查</button>
+    <button id="scopeBtn" title="切换「完成检查」的范围：只查当前视窗，还是查全部历史 K 线">范围：视窗内</button>
+    <button id="helpBtn" title="使用说明">? 帮助</button>
+    <div class="seg" id="bodySeg" title="阳线样式（阴线恒为实心绿）">
+      <button data-b="hollow" class="on">阳线空心</button>
+      <button data-b="solid">阳线实心</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="stat" id="stat"></div>
+  </div>
+
+  <div class="wrap">
+    <canvas id="cv"></canvas>
+    <div class="tip" id="tip"></div>
+  </div>
+
+  <div class="foot">
+    <span>① 点 K 线 = 选中它 + 右边相邻一根</span>
+    <span>② <b style="color:#0ecb81">光头光脚</b>画法：实体=最高到最低，无影线，含包含一眼可见</span>
+    <span>③ 方向<b style="color:#4c8dff">自动</b>：b 与其左侧参照 a 比（g_b&gt;g_a 向上 / d_b&lt;d_a 向下）→ 高高/低低（<kbd>D</kbd> 手动覆盖，手动时会校验对错）</span>
+    <span>③ 拖橙色框<b style="color:#ffb020">上/下边</b>向外扩微调</span>
+    <span>④ 点 <b style="color:#ffb020">合并</b> 或 <kbd>Enter</kbd>（先校验：必须含包含 + 手动时方向要对）</span>
+    <span>⑤ 点 <b style="color:#0ecb81">✅ 完成检查</b> 或 <kbd>F</kbd>：查<b>当前视窗</b>还剩几处含包含（旁边可切全序列）</span>
+    <span><kbd>←</kbd><kbd>→</kbd> 换选中 · <kbd>Esc</kbd> 取消 · <kbd>Ctrl+Z</kbd> 撤销 · 滚轮缩放 · 空白处拖动平移</span>
+    <span style="color:#4d5a6d">详细规则见顶部 <b style="color:#93a1b5">? 帮助</b></span>
+  </div>
+</div>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <h3>K 线合并练习 · 说明</h3>
+    <table>
+      <tr><td>选两根</td><td>鼠标左键点击任意一根 K 线 → 自动选中它与右侧相邻一根（黄框标出）</td></tr>
+      <tr><td style="color:#ffb020">方向判定</td><td>自动，按缠论原文。要合并 <b>b、c</b>（b 左 c 右），参照物 <b>a = b 左边那根「与 b 无包含关系」的 K 线</b>：<br>
+        · <b>g_b &gt; g_a</b>（b 的高点高于 a）→ <b>向上处理</b><br>
+        · <b>d_b &lt; d_a</b>（b 的低点低于 a）→ <b>向下处理</b><br>
+        <b>★ a 必须与 b 无包含</b>：若 a 与 b 本身有包含，a 没资格当参照，继续往左找，直到找到无包含的那根<br>
+        <b>★ 用严格不等号</b>：原文写的 ≥ / ≤ 是笔误——等高或等低必然构成包含，与「b 与 a 无包含」的前提矛盾；实务遇到等高/等低，方向延续更早的判定<br>
+        方向<b>逐次重新判定</b>。顶部「自动/向上/向下」可手动覆盖（<kbd>D</kbd> 循环）</td></tr>
+      <tr><td style="color:#ffb020">合并规则</td><td>
+        <table style="margin-top:4px">
+          <tr><td style="width:auto;color:#93a1b5;border:0">处理方向</td><td style="width:auto;color:#93a1b5;border:0">新K线高点</td><td style="width:auto;color:#93a1b5;border:0">新K线低点</td><td style="width:auto;color:#93a1b5;border:0">口诀</td></tr>
+          <tr><td style="border:0">向上</td><td style="border:0">两根中<b>较高</b>的高</td><td style="border:0">两根中<b>较高</b>的低</td><td style="border:0;color:#f3453f">高高（阳线）</td></tr>
+          <tr><td style="border:0">向下</td><td style="border:0">两根中<b>较低</b>的高</td><td style="border:0">两根中<b>较低</b>的低</td><td style="border:0;color:#0ecb81">低低（阴线）</td></tr>
+        </table>
+        <div style="margin-top:6px;color:#a9b6c8">注意反直觉处：向上处理时<b>低点也取"较高"的</b>（整体往上抬）；向下处理时<b>高点也取"较低"的</b>（整体往下压）。四个值都往方向那一侧收——不是"向上=都取最大值"。</div>
+      </td></tr>
+      <tr><td>等价表</td><td>
+        <table style="margin-top:4px">
+          <tr><td style="width:auto;color:#93a1b5;border:0">包含</td><td style="width:auto;color:#93a1b5;border:0">向上(高高)</td><td style="width:auto;color:#93a1b5;border:0">向下(低低)</td></tr>
+          <tr><td style="border:0">左包右</td><td style="border:0">高←左　低←右</td><td style="border:0">高←右　低←左</td></tr>
+          <tr><td style="border:0">右包左</td><td style="border:0">高←右　低←左</td><td style="border:0">高←左　低←右</td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="color:#ffb020">合并前校验</td><td>点「合并」或 <kbd>Enter</kbd> 时会先检查，<b>不合格直接拒绝</b>，pill 转红抖动并给出原因：<br>
+        <b>① 是否存在包含关系</b>——没包含就合并等于把两根无关 K 线凭空捏成一根，必拒。程序会列出两根的实际高低区间<br>
+        <b>② 方向是否正确</b>——<span style="color:#0ecb81">「自动」模式下不校验</span>（方向由程序按规则算出，不存在选错）；<b>手动模式才校验</b>：你断言的方向必须和规则判定一致，否则拒绝并告诉你正确方向和依据（a 是哪根、g_b/g_a 或 d_b/d_a 的比较）。<br>
+        若 b 左侧找不到任何「与 b 无包含」的参照物，方向只能靠延续、判不出对错，此时<b>不拦</b></td></tr>
+      <tr><td style="color:#0ecb81">完成检查</td><td>顶部「✅ 完成检查」按钮（或按 <kbd>F</kbd>）扫描<b>相邻 K 线</b>，列出还有几处包含关系没处理：<br>
+        <b>范围默认是「视窗内」</b>——只查你眼前这 60/90/120/250/500/1000 根，这才是你正在练的区段。视窗干净了会提示「视窗外还有 N 处」，把 K 线拖到别的区段继续练即可<br>
+        旁边「范围：视窗内 / 全序列」可切换；切到<b>全序列</b>则是查这一整个指数（2005 年至今）的所有包含关系<br>
+        · <b>还有剩余</b>：红框列出未处理的相邻对（最多 6 条）、各自应按高高还是低低，并<b>自动定位到第 1 处</b><br>
+        · <b>已经全清</b>：绿框确认该范围内「不存在任何相邻包含关系」<br>
+        按钮上实时显示剩余处数（<span style="color:#ffb020">剩 N</span> / <span style="color:#0ecb81">全清</span>）；滚轮缩放、左右平移、合并、撤销、切指数都会重算</td></tr>
+      <tr><td>K线画法</td><td><b>光头光脚</b>：实体矩形从最高价一直画到最低价，<b>完全不画上下影线</b>。开收盘只决定颜色（阳红阴绿），不影响形状——缠论只关心高低点，这样相邻 K 线的包含关系一眼可见。阳线可切空心/实心</td></tr>
+      <tr><td>影线</td><td>合并后的 K 线同样光头光脚，且实体正好等于规则算出的 [低, 高] 区间：向上 → 开=低、收=高（阳）；向下 → 开=高、收=低（阴）</td></tr>
+      <tr><td>框选微调</td><td>框的初始位置就是上表算出的 [低,高]。拖上边向上、下边向下可<b>向外扩</b>（此时实体同步变长，仍无影线）；向内会被挡住</td></tr>
+      <tr><td>落位</td><td>合并结果落在被点击的那根（左）K 线槽位，右侧整体左移一格补齐，不留空档。视窗贴右时，左侧 K 线随之外移一格</td></tr>
+      <tr><td>撤销</td><td><kbd>Ctrl+Z</kbd> 逐步撤销、<kbd>Ctrl+Y</kbd> 重做；「重置练习」还原本指数全部合并</td></tr>
+      <tr><td>导航</td><td>滚轮缩放（以光标为锚）· 空白处左键拖动平移 · <kbd>R</kbd> 复位视图 · <kbd>F</kbd> 完成检查 · 点右上 × 取消选择</td></tr>
+    </table>
+    <div class="note">
+      数据：<span id="srcTxt"></span><br>
+      上证指数已与本地缓存 <code>stock-analyzer\data\kline_8y\_sh000001.csv</code> 的 1962 个收盘价逐日比对全部一致，
+      并与东方财富 akshare 独立取的 6 根 OHLC 比对全部一致。<br>
+      指数无需复权；练习进度自动存在浏览器本地，刷新不丢。
+    </div>
+    <div class="x"><button id="maskClose">知道了</button></div>
+  </div>
+</div>
+
+<script id="DATA" type="application/json">__DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById('DATA').textContent);
+const COL = {
+  up:'#f3453f', dn:'#0ecb81', acc:'#ffb020', sel:'#3d7eff',
+  grid:'#161d29', gridS:'#1e2836', tx:'#93a1b5', txs:'#dfe6f0', axis:'#0a0e15'
+};
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const tip = document.getElementById('tip');
+const $ = id => document.getElementById(id);
+
+/* ---------------- 状态 ---------------- */
+const S = {
+  sym:'sh000001', freq:'D', bodyMode:'hollow', dirMode:'auto',
+  base:[], bars:[],
+  count:120, start:0,
+  sel:null,          // 选中的第一根索引 i（同时选中 i 与 i+1）
+  frame:null,        // {top,bot} 价格
+  hover:null,
+  down:null,
+  undo:[], redo:[],
+  hit:null,
+  flash:0,            // 合并被拒时 pill 闪红的时间戳
+  pending:null,       // 尚未处理的相邻包含对索引（完成检查用）
+  doneScope:'view'    // 完成检查范围：'view' 当前视窗 / 'all' 全序列
+};
+const LSK = 'chan_kmerge_v3';
+
+function toBars(rows){
+  return rows.map(r => ({ d:r[0], dEnd:r[0], o:r[1], h:r[2], l:r[3], c:r[4], v:r[5], parts:1 }));
+}
+function aggWeekly(rows){
+  const out=[]; let curKey=null;
+  for(const r of rows){
+    const dt=new Date(+r[0].slice(0,4), +r[0].slice(4,6)-1, +r[0].slice(6,8));
+    const off=(dt.getDay()+6)%7; dt.setDate(dt.getDate()-off);
+    const key=dt.toISOString().slice(0,10).replace(/-/g,'');
+    if(key===curKey && out.length){
+      const w=out[out.length-1];
+      w.h=Math.max(w.h,r[2]); w.l=Math.min(w.l,r[3]); w.c=r[4];
+      w.v+=r[5]||0; w.dEnd=r[0];
+    }else{
+      curKey=key;
+      out.push({d:r[0], dEnd:r[0], o:r[1], h:r[2], l:r[3], c:r[4], v:r[5], parts:1});
+    }
+  }
+  return out;
+}
+function baseFor(sym, freq){
+  const rows = DATA.indices[sym].rows;
+  return freq==='W' ? aggWeekly(rows) : toBars(rows);
+}
+function sig(){ return DATA.meta.generated_at + '|' + S.sym + '|' + S.freq; }
+
+function loadIdx(){
+  const keepStart = S.start;
+  S.base = baseFor(S.sym, S.freq);
+  const st = loadState();
+  if(st && st.sig===sig() && Array.isArray(st.bars) && st.bars.length){
+    S.bars = st.bars;
+    S.count = st.count || S.count;
+    S.start = clamp(st.start!=null ? st.start : (S.bars.length-S.count), 0, Math.max(0,S.bars.length-S.count));
+    S.undo = st.undo||[]; S.redo = st.redo||[];
+    S.doneScope = (st.doneScope==='all') ? 'all' : 'view';
+  }else{
+    S.bars = S.base.slice();
+    S.undo=[]; S.redo=[];
+    S.count = Math.min(S.count, S.bars.length);
+    S.start = Math.max(0, S.bars.length - S.count);
+  }
+  S.sel=null; S.frame=null;
+  refreshPending();
+  syncBtns();
+}
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+function loadState(){ try{ return JSON.parse(localStorage.getItem(LSK)||'null'); }catch(e){ return null; } }
+function save(){
+  try{
+    localStorage.setItem(LSK, JSON.stringify({
+      sig:sig(), bars:S.bars, count:S.count, start:S.start,
+      undo:S.undo, redo:S.redo, bodyMode:S.bodyMode, dirMode:S.dirMode, doneScope:S.doneScope
+    }));
+  }catch(e){ /* file:// 可能禁 localStorage，降级为不保存 */ }
+}
+
+/* ---------------- 布局 / 映射 ---------------- */
+let W=0,H=0,DPR=1,PAD={l:14,r:74,t:16,b:30},plotW=0,plotH=0;
+function layout(){
+  const r = cv.getBoundingClientRect();
+  W = Math.max(320, r.width); H = Math.max(240, r.height);
+  DPR = window.devicePixelRatio||1;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  plotW = W-PAD.l-PAD.r; plotH = H-PAD.t-PAD.b;
+}
+function scale(){ const n=S.bars.length||1; S.count=clamp(S.count,20,n); S.start=clamp(S.start,0,Math.max(0,n-S.count)); }
+function barW(){ return plotW/S.count; }
+function xOf(i){ return PAD.l + (i-S.start+0.5)*barW(); }
+function idxAt(x){ return S.start + Math.floor((x-PAD.l)/barW()); }
+
+let pMin=0,pMax=1;
+function priceScale(){
+  const a=Math.max(0,S.start), b=Math.min(S.bars.length, S.start+S.count);
+  let lo=Infinity, hi=-Infinity;
+  for(let i=a;i<b;i++){ const k=S.bars[i]; if(k.l<lo)lo=k.l; if(k.h>hi)hi=k.h; }
+  if(S.frame && S.sel!=null && S.sel>=a && S.sel+1<b){ lo=Math.min(lo,S.frame.bot); hi=Math.max(hi,S.frame.top); }
+  if(!isFinite(lo)||!isFinite(hi)){ lo=0; hi=1; }
+  if(hi-lo<1e-6){ hi=lo+1; }
+  const pad=(hi-lo)*0.06;
+  pMin=lo-pad; pMax=hi+pad;
+}
+function yOf(p){ return PAD.t + (pMax-p)/(pMax-pMin)*plotH; }
+function priceAt(y){ return pMax - (y-PAD.t)/plotH*(pMax-pMin); }
+
+/* ---------------- 绘制 ---------------- */
+function fmtDate(d){ return d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8); }
+function fmtMD(d){ return d.slice(4,6)+'-'+d.slice(6,8); }
+function decs(range){ return range<6?2:(range<60?1:(range<600?1:0)); }
+function gridStep(range){
+  const raw=range/6, p=Math.pow(10,Math.floor(Math.log10(raw||1)));
+  for(const m of [1,2,2.5,5,10]) if(p*m>=raw) return p*m;
+  return p*10;
+}
+
+function draw(){
+  try{ _draw(); }
+  catch(e){
+    console.error('render failed:', e);
+    ctx.save(); ctx.fillStyle='#f3453f'; ctx.font='12px system-ui,sans-serif';
+    ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.fillText('渲染出错：'+(e&&e.message||e), PAD.l+4, PAD.t+4); ctx.restore();
+  }
+}
+function _draw(){
+  scale(); layout(); priceScale();
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle=COL.axis; ctx.fillRect(0,0,W,H);
+
+  /* 网格 + 价格轴 */
+  const step=gridStep(pMax-pMin), dd=decs(pMax-pMin);
+  ctx.font='11px system-ui,sans-serif'; ctx.textBaseline='middle';
+  for(let p=Math.ceil(pMin/step)*step; p<=pMax; p+=step){
+    const y=Math.round(yOf(p))+0.5;
+    ctx.strokeStyle=COL.grid; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(PAD.l,y); ctx.lineTo(W-PAD.r,y); ctx.stroke();
+    ctx.fillStyle=COL.tx; ctx.textAlign='left';
+    ctx.fillText(p.toLocaleString('zh-CN',{minimumFractionDigits:dd,maximumFractionDigits:dd}), W-PAD.r+8, y);
+  }
+  /* 日期轴 */
+  const a=Math.max(0,S.start), b=Math.min(S.bars.length,S.start+S.count);
+  const k=Math.max(1, Math.ceil(S.count/Math.max(2,Math.floor(plotW/92))));
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  for(let i=a;i<b;i++){
+    if((i-S.start)%k) continue;
+    const d=S.bars[i].d;
+    const lab = (d.slice(4,6)==='01') ? d.slice(0,7) : fmtMD(d);
+    ctx.strokeStyle=COL.gridS; ctx.beginPath();
+    const x=Math.round(xOf(i))+0.5;
+    ctx.moveTo(x,PAD.t); ctx.lineTo(x,H-PAD.b); ctx.stroke();
+    ctx.fillStyle=COL.tx; ctx.fillText(lab, x, H-PAD.b+8);
+  }
+
+  /* 选中两根的背景带 */
+  if(S.sel!=null && S.sel>=a-1 && S.sel+1<b+1){
+    const x0=xOf(S.sel)-barW()/2, x1=xOf(S.sel+1)+barW()/2;
+    ctx.fillStyle='rgba(61,126,255,.10)';
+    ctx.fillRect(x0,PAD.t,x1-x0,plotH);
+    ctx.strokeStyle='rgba(61,126,255,.45)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x0)+0.5,PAD.t); ctx.lineTo(Math.round(x0)+0.5,H-PAD.b);
+    ctx.moveTo(Math.round(x1)+0.5,PAD.t); ctx.lineTo(Math.round(x1)+0.5,H-PAD.b);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  /* K 线：光头光脚 —— 实体矩形从最高价一直画到最低价，完全不画上下影线 */
+  const bw=barW(), body=Math.max(1,Math.min(20,bw*0.66));
+  for(let i=a;i<b;i++){
+    const k=S.bars[i], x=xOf(i);
+    const up = k.c>=k.o;
+    const col = up?COL.up:COL.dn;
+    const yh=yOf(k.h), yl=yOf(k.l);
+    const bx=Math.round(x-body/2)+0.5;
+    const top=Math.min(yh,yl), hgt=Math.max(1.5,Math.abs(yl-yh));
+    if(up && S.bodyMode==='hollow' && body>=3){
+      ctx.fillStyle=COL.axis; ctx.fillRect(bx,top,body,hgt);
+      ctx.strokeStyle=col; ctx.lineWidth=1;
+      ctx.strokeRect(bx+0.5,top+0.5,body-1,Math.max(1,hgt-1));
+    }else{
+      ctx.fillStyle=col; ctx.fillRect(bx,top,body,hgt);
+    }
+    /* 已合并标记 */
+    if(k.parts>1){
+      ctx.fillStyle=COL.acc; ctx.beginPath();
+      ctx.arc(x, top-5, 2.6, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  /* 合并框 + pill */
+  S.hit={};
+  if(S.sel!=null && S.bars[S.sel] && S.bars[S.sel+1]){
+    const A=S.bars[S.sel], B=S.bars[S.sel+1];
+    const ed=effectiveDir();
+    const rr=mergeRange(A,B,ed.dir);
+    const hiRef=rr.h, loRef=rr.l;
+    const containTxt = rr.containTxt;
+    const pairL=xOf(S.sel)-bw/2-5, pairR=xOf(S.sel+1)+bw/2+5;
+    const cxm=xOf(S.sel+0.5);
+    let fw=Math.max(pairR-pairL,104);                 /* 窄屏时保证框和 pill 够宽、够难点 */
+    let fx=clamp(cxm-fw/2, PAD.l, W-PAD.r-fw);
+    const yt=yOf(S.frame.top), yb=yOf(S.frame.bot);
+    const fr={x:fx,y:yt,w:fw,h:Math.max(2,yb-yt)};
+    S.hit.frame=fr;
+
+    ctx.fillStyle='rgba(255,176,32,.07)'; ctx.fillRect(fr.x,fr.y,fr.w,fr.h);
+    ctx.strokeStyle=COL.acc; ctx.lineWidth=1; ctx.setLineDash([5,3]);
+    ctx.strokeRect(Math.round(fr.x)+0.5,Math.round(fr.y)+0.5,Math.round(fr.w),Math.round(fr.h));
+    ctx.setLineDash([]);
+    /* 参考线：两根 K 线真实高低 */
+    ctx.strokeStyle='rgba(255,176,32,.45)'; ctx.lineWidth=1; ctx.setLineDash([2,4]);
+    ctx.beginPath();
+    ctx.moveTo(fr.x,Math.round(yOf(hiRef))+0.5); ctx.lineTo(fr.x+fr.w,Math.round(yOf(hiRef))+0.5);
+    ctx.moveTo(fr.x,Math.round(yOf(loRef))+0.5); ctx.lineTo(fr.x+fr.w,Math.round(yOf(loRef))+0.5);
+    ctx.stroke(); ctx.setLineDash([]);
+    /* 拖拽把手（上下边中点）*/
+    const hx=Math.round(fr.x+fr.w/2)+0.5;
+    ctx.fillStyle=COL.acc;
+    for(const y of [fr.y, fr.y+fr.h]){
+      ctx.fillRect(hx-13, Math.round(y)-2.5, 26, 5);
+      ctx.beginPath(); ctx.arc(hx-13, y, 3.4, 0, Math.PI*2); ctx.arc(hx+13, y, 3.4, 0, Math.PI*2); ctx.fill();
+    }
+    /* 数值标签 */
+    ctx.font='10.5px ui-monospace,Consolas,monospace'; ctx.textBaseline='middle';
+    ctx.fillStyle=COL.acc; ctx.textAlign='left';
+    ctx.fillText(dec(S.frame.top), fr.x+fr.w+6, fr.y);
+    ctx.fillText(dec(S.frame.bot), fr.x+fr.w+6, fr.y+fr.h);
+    ctx.fillStyle='rgba(147,161,181,.9)';
+    ctx.fillText('高←'+rr.hiFrom, fr.x+fr.w+6, fr.y+13);
+    ctx.fillText('低←'+rr.loFrom, fr.x+fr.w+6, fr.y+fr.h-13);
+    /* 框中央：判定依据 + 规则，一眼看清会合并成什么 */
+    ctx.textAlign='center'; ctx.font='11px system-ui,sans-serif';
+    const upDir = ed.dir==='up';
+    ctx.fillStyle = upDir?'rgba(243,69,63,.95)':'rgba(14,203,129,.95)';
+    ctx.fillText((ed.manual?'手动':'自动')+(upDir?' ⇅ 向上 · 高高':' ⇇ 向下 · 低低')
+                 +' · '+containTxt, fr.x+fr.w/2, fr.y+fr.h/2-7);
+    ctx.fillStyle='rgba(147,161,181,.95)'; ctx.font='10.5px ui-monospace,Consolas,monospace';
+    ctx.fillText(ed.manual ? '手动指定方向'
+      : (ed.auto.aIdx>=0 ? ('b vs a#'+ed.auto.aIdx+'  '+ed.auto.basis) : ed.auto.basis),
+      fr.x+fr.w/2, fr.y+fr.h/2+8);
+    ctx.textAlign='left';
+
+    /* pill「合并」 */
+    const pad=12, th=26;
+    const flashing = S.flash && (Date.now()-S.flash<700);
+    const label = flashing ? '✗ 不可合并' : '合并';
+    ctx.font='600 13px system-ui,sans-serif';
+    const tw=ctx.measureText(label).width;
+    const pw=tw+pad*2+(flashing?0:18), ph=th;
+    let px=clamp(fr.x+fr.w/2-pw/2, PAD.l, W-PAD.r-pw);
+    let py=fr.y-ph-9;
+    if(py<PAD.t+2) py=fr.y+fr.h+9;
+    const pil={x:px,y:py,w:pw,h:ph};
+    S.hit.pill=pil;
+    const hot = S.hover && inRect(S.hover.x,S.hover.y,pil);
+    if(flashing){                                /* 被拒 → pill 左右抖一下并转红 */
+      const k=Math.sin((Date.now()-S.flash)/26);
+      ctx.save();
+      ctx.translate(px+pw/2, py+ph/2);
+      ctx.translate(k*3.4, 0);
+      ctx.translate(-(px+pw/2), -(py+ph/2));
+    }
+    ctx.fillStyle = flashing ? '#ff5b5b' : (hot?'#ffc44d':COL.acc);
+    roundRect(px,py,pw,ph,13); ctx.fill();
+    if(flashing){
+      ctx.strokeStyle='rgba(255,255,255,'+(0.3+0.5*Math.abs(Math.sin((Date.now()-S.flash)/40)))+')';
+      ctx.lineWidth=2; roundRect(px-1.5,py-1.5,pw+3,ph+3,14); ctx.stroke();
+    }
+    ctx.fillStyle= flashing ? '#2a0808' : '#1a1204'; ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.font='600 13px system-ui,sans-serif';
+    ctx.fillText(label, px+pad, py+ph/2+0.5);
+    ctx.font='10px ui-monospace,monospace'; ctx.fillStyle= flashing ? 'rgba(42,8,8,.75)' : 'rgba(26,18,4,.72)';
+    if(!flashing) ctx.fillText('⏎', px+pad+tw+7, py+ph/2+0.5);
+    if(flashing) ctx.restore();
+
+    /* 取消 × */
+    const cx={x:fr.x-9,y:fr.y-9,w:18,h:18}; S.hit.cancel=cx;
+    ctx.strokeStyle='rgba(147,161,181,.55)'; ctx.lineWidth=1.2;
+    ctx.strokeRect(Math.round(cx.x)+0.5,Math.round(cx.y)+0.5,17,17);
+    ctx.beginPath();
+    ctx.moveTo(cx.x+5,cx.y+5); ctx.lineTo(cx.x+13,cx.y+13);
+    ctx.moveTo(cx.x+13,cx.y+5); ctx.lineTo(cx.x+5,cx.y+13);
+    ctx.stroke();
+  }
+
+  /* 十字光标 */
+  if(S.hover && !S.down){
+    const {x,y}=S.hover;
+    if(x>PAD.l && x<W-PAD.r && y>PAD.t && y<H-PAD.b){
+      ctx.save(); ctx.strokeStyle='rgba(160,175,200,.28)'; ctx.lineWidth=1; ctx.setLineDash([3,4]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x)+0.5,PAD.t); ctx.lineTo(Math.round(x)+0.5,H-PAD.b);
+      ctx.moveTo(PAD.l,Math.round(y)+0.5); ctx.lineTo(W-PAD.r,Math.round(y)+0.5);
+      ctx.stroke(); ctx.restore();
+    }
+  }
+
+  /* 顶部水印：数据区间 */
+  if(b>a){
+    ctx.font='11px system-ui,sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.fillStyle='rgba(147,161,181,.55)';
+    const nm=DATA.indices[S.sym].name+' · '+(S.freq==='D'?'日K':'周K');
+    ctx.fillText(nm+'   '+S.bars[a].d.slice(0,4)+'-'+S.bars[a].d.slice(4,6)+'-'+S.bars[a].d.slice(6,8)
+      +'  ~  '+S.bars[b-1].d.slice(0,4)+'-'+S.bars[b-1].d.slice(4,6)+'-'+S.bars[b-1].d.slice(6,8), PAD.l+2, PAD.t+2);
+  }
+}
+function dec(p){ return p.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function inRect(x,y,r){ return !!r && x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h; }
+function near(x,y,r){ return !!r && x>=r.x-6 && x<=r.x+r.w+6 && Math.abs(y-(r.y+r.h/2))<=6; }
+
+/* ---------------- tooltip ---------------- */
+function updateTip(mx,my){
+  const i=idxAt(mx);
+  if(i<S.start || i>=Math.min(S.bars.length,S.start+S.count) || S.down){ tip.style.display='none'; return; }
+  const k=S.bars[i], prev=i>0?S.bars[i-1]:null;
+  const pct=prev?((k.c-prev.c)/prev.c*100):null;
+  const up=k.c>=k.o;
+  tip.innerHTML =
+    '<div class="hd">'+fmtDate(k.d)+(k.dEnd!==k.d?' ~ '+fmtDate(k.dEnd):'')+'</div>'+
+    '<div class="r"><span>开</span><span>'+dec(k.o)+'</span></div>'+
+    '<div class="r"><span>高</span><span>'+dec(k.h)+'</span></div>'+
+    '<div class="r"><span>低</span><span>'+dec(k.l)+'</span></div>'+
+    '<div class="r"><span>收</span><span class="'+(up?'up':'dn')+'">'+dec(k.c)+'</span></div>'+
+    (pct!=null?'<div class="r"><span>较前收</span><span class="'+(pct>=0?'up':'dn')+'">'+pct.toFixed(2)+'%</span></div>':'')+
+    '<div class="r"><span>量</span><span>'+(k.v||0).toLocaleString('zh-CN')+'</span></div>'+
+    (k.parts>1?'<div class="mg">✦ 已合并 '+k.parts+' 根　'
+      +(k.rule==='up'?'向上 ⇅ 阳线':'向下 ⇵ 阴线')
+      +'<br>高←'+(k.hiFrom||'?')+'　低←'+(k.loFrom||'?')
+      +'<br>光头光脚，实体 = [低, 高]</div>':'');
+  tip.style.display='block';
+  const tw=tip.offsetWidth, th=tip.offsetHeight;
+  tip.style.left=Math.min(W-tw-8, mx+16)+'px';
+  tip.style.top =Math.min(H-th-8, Math.max(6,my-th-12))+'px';
+}
+
+/* ---------------- 选中 / 框 ---------------- */
+function selHiLo(){
+  const A=S.bars[S.sel], B=S.bars[S.sel+1];
+  const ed=effectiveDir();
+  const r=mergeRange(A,B,ed.dir);
+  return {hi:r.h, lo:r.l, r, ed};
+}
+function selectBar(i){
+  if(i<0 || i+1>=S.bars.length){ toast('右侧已无相邻 K 线可合并'); return; }
+  S.sel=i;
+  const {hi,lo}=selHiLo();
+  S.frame={top:hi, bot:lo};
+  ensureVisible(i+1);
+  syncBtns(); draw();
+}
+function clearSel(){ S.sel=null; S.frame=null; tip.style.display='none'; syncBtns(); draw(); }
+function ensureVisible(i){
+  scale();
+  if(i<S.start) S.start=i;
+  if(i>=S.start+S.count) S.start=i-S.count+1;
+  scale();
+}
+function snapTop(v,hi){
+  if(Math.abs(yOf(hi)-yOf(v))<=3) return hi;
+  return Math.max(hi, v);
+}
+function snapBot(v,lo){
+  if(Math.abs(yOf(lo)-yOf(v))<=3) return lo;
+  return Math.min(lo, v);
+}
+
+/* ---------------- 合并 ---------------- */
+/* 缠论原文的包含处理：
+   要合并 b、c（b 左 c 右）。参照物 a = b 左边那根「与 b 无包含关系」的 K 线
+   —— 若 a 与 b 本身有包含，a 没资格当参照，继续往左找，直到找到无包含的那根。
+   方向：g_b > g_a → 向上处理 ； d_b < d_a → 向下处理
+        （严格不等号；原文写的 ≥/≤ 是笔误，等高/等低必然构成包含，与前提矛盾）
+        遇到等高/等低 → 方向延续更早的那次判定。
+   合并：向上 = 高高（较高的高 + 较高的低）；向下 = 低低（较低的高 + 较低的低） */
+function isContain(x,y){
+  return (x.h>=y.h && x.l<=y.l) || (y.h>=x.h && y.l<=x.l);
+}
+/* 方向延续：往左找严格可比的一对 */
+function inheritedDir(i, depth){
+  depth=depth||0;
+  if(depth>300 || i<=0) return 'up';
+  const b=S.bars[i];
+  if(b.rule) return b.rule;
+  for(let j=i-1;j>=0;j--){
+    if(!isContain(S.bars[j],b)){
+      if(b.h > S.bars[j].h) return 'up';
+      if(b.l < S.bars[j].l) return 'down';
+      return inheritedDir(j, depth+1);
+    }
+  }
+  return 'up';
+}
+/* 合并 (i, i+1) 时的自动方向：比 b=S.bars[i] 与其参照物 a */
+function autoDirFor(i){
+  const b=S.bars[i];
+  for(let j=i-1;j>=0;j--){
+    if(!isContain(S.bars[j],b)){
+      const a=S.bars[j];
+      let dir, basis;
+      if(b.h > a.h){       dir='up';   basis='g_b '+dec(b.h)+' > g_a '+dec(a.h); }
+      else if(b.l < a.l){ dir='down'; basis='d_b '+dec(b.l)+' < d_a '+dec(a.l); }
+      else {              dir=inheritedDir(j,1); basis='等高/等低 → 延续'; }
+      return {dir, aIdx:j, a, b, basis};
+    }
+  }
+  return {dir:inheritedDir(i,1), aIdx:-1, a:null, b, basis:'前面无参照 → 延续'};
+}
+function effectiveDir(){
+  if(S.dirMode!=='auto') return {dir:S.dirMode, manual:true, auto:null};
+  const ad=autoDirFor(S.sel);
+  return {dir:ad.dir, manual:false, auto:ad};
+}
+function mergeRange(A,B,dir){
+  const up = (dir==='up');
+  const h = up ? Math.max(A.h,B.h) : Math.min(A.h,B.h);
+  const l = up ? Math.max(A.l,B.l) : Math.min(A.l,B.l);
+  const hiFrom = up ? (A.h>=B.h?'左':'右') : (A.h<=B.h?'左':'右');
+  const loFrom = up ? (A.l>=B.l?'左':'右') : (A.l<=B.l?'左':'右');
+  const leftContains  = (A.h>=B.h && A.l<=B.l);
+  const rightContains = (B.h>=A.h && B.l<=A.l);
+  const containTxt = leftContains?'左包右':(rightContains?'右包左':'互不包含');
+  return {h,l,hiFrom,loFrom,containTxt,leftContains,rightContains};
+}
+function mergedBar(A,B,top,bot,dir){
+  const r=mergeRange(A,B,dir);
+  const h=Math.max(r.h,top), l=Math.min(r.l,bot);
+  const o = dir==='up'? l : h;      /* 向上：开=低 收=高（阳） */
+  const c = dir==='up'? h : l;      /* 向下：开=高 收=低（阴） */
+  return { d:A.d, dEnd:(B.dEnd||B.d), o, h, l, c, v:(A.v||0)+(B.v||0),
+           parts:(A.parts||1)+(B.parts||1),
+           rule:dir, hiFrom:r.hiFrom, loFrom:r.loFrom };
+}
+/* ---------------- 合并前校验 ----------------
+   返回 {ok, kind, title, detail}
+   kind: 'contain' 两根不构成包含 / 'dir' 手动方向与规则不符 / null 通过 */
+function checkMergeable(i){
+  const A=S.bars[i], B=S.bars[i+1];
+  if(!A || !B) return {ok:false, kind:'none', title:'右侧已无相邻 K 线'};
+
+  /* ① 必须真的存在包含关系 —— 这是缠论「包含处理」的前提。
+        没有包含就合并 = 把两根互不相关的 K 线凭空捏成一根，是错的。 */
+  if(!isContain(A,B)){
+    return {ok:false, kind:'contain',
+      title:'这两根不构成包含关系，不能合并',
+      detail:'包含的定义：其中一根的高 ≥ 另一根的高，且低 ≤ 另一根的低（另一根被完全罩住）'
+           +'\n当前  b  高 '+dec(A.h)+'  低 '+dec(A.l)
+           +'\n      c  高 '+dec(B.h)+'  低 '+dec(B.l)
+           +'\n结果  两端朝同一方向错开，没有任何一根把另一根完全罩住'
+           +'\n\n换一对试试 —— 只有含包含的两根才需要处理。'};
+  }
+
+  /* ② 方向是否正确。
+        自动模式：方向是程序按规则算出来的，不存在「选错」，故不校验这一项。
+        手动模式：方向是你自己断言的，必须和缠论规则对得上才算通过。 */
+  if(S.dirMode!=='auto'){
+    const ad=autoDirFor(i);
+    if(ad.aIdx<0) return {ok:true, kind:'nodirref'};  /* 无合格参照物 → 方向只能靠延续，判不了，放行 */
+    if(ad.dir!==S.dirMode){
+      return {ok:false, kind:'dir',
+        title:'方向判错了：你选的是'+(S.dirMode==='up'?'向上 ⇅ 高高':'向下 ⇇ 低低')
+             +'，按缠论规则应为'+(ad.dir==='up'?'向上 ⇅ 高高':'向下 ⇇ 低低'),
+        detail:'参照物 a = '+fmtDate(S.bars[ad.aIdx].d)+'（b 左侧那根与 b 无包含的 K 线）'
+             +'\n依据  '+ad.basis
+             +'\n→ 应取 '+(ad.dir==='up'?'高高：两根中较高的高 + 较高的低（阳线红）'
+                                    :'低低：两根中较低的高 + 较低的低（阴线绿）')
+             +'\n\n按 D 或点顶部「'+(ad.dir==='up'?'向上 ⇅':'向下 ⇇')+'」改正后再点合并'};
+    }
+  }
+  return {ok:true, kind:null};
+}
+
+/* ---------------- 全序列完成检查 ---------------- */
+/* 扫描相邻包含关系。from/to 缺省 = 全序列；也可只扫当前视窗那一段 */
+function findPending(from,to){
+  const n=S.bars.length;
+  const a = from==null ? 0 : Math.max(0,from);
+  const b = to==null   ? n : Math.min(n,to);
+  const out=[];
+  for(let i=a;i<b-1;i++){
+    if(isContain(S.bars[i],S.bars[i+1])) out.push(i);
+  }
+  return out;
+}
+/* 当前视窗覆盖的索引区间（末根 +1） */
+function viewRange(){
+  return [ Math.max(0,S.start), Math.min(S.bars.length, S.start+S.count) ];
+}
+function refreshPending(){
+  S.pending = (S.doneScope==='all') ? findPending() : findPending(...viewRange());
+}
+function setScope(sc){
+  S.doneScope = sc;
+  refreshPending();
+  $('scopeBtn').textContent = '范围：'+(sc==='all'?'全序列':'视窗内');
+  save(); syncBtns();
+  const [a,b]=viewRange();
+  toast('完成检查范围 = '+(sc==='all'
+    ? '全序列 '+S.bars.length+' 根'
+    : '当前视窗 '+Math.max(0,b-a)+' 根（'+fmtDate(S.bars[a].d)+' ~ '+fmtDate(S.bars[b-1].d)+'）'));
+}
+
+function doDone(){
+  const freq = S.freq==='W' ? '周K' : '日K';
+  const [va,vb] = viewRange();
+  const inView = findPending(va, vb);
+  const inAll  = findPending();
+  S.pending = (S.doneScope==='all') ? inAll : inView;
+
+  const isAll = S.doneScope==='all';
+  const scopeName = isAll ? '全序列' : '当前视窗';
+  const scopeDesc = isAll
+    ? (S.bars.length+' 根（'+fmtDate(S.bars[0].d)+' ~ '+fmtDate(S.bars[S.bars.length-1].d)+'）')
+    : (Math.max(0,vb-va)+' 根（'+fmtDate(S.bars[va].d)+' ~ '+fmtDate(S.bars[vb-1].d)+'）');
+
+  const pend = S.pending;
+  if(!pend.length){
+    let extra='';
+    if(!isAll && inAll.length>inView.length)
+      extra='\n本视窗干净了，但视窗之外还有 '+(inAll.length-inView.length)+' 处包含关系（属于其它时间区段）。'
+          +'\n把 K 线左右拖到别的区段继续练，或点「范围：视窗内」切成「全序列」看总量。';
+    note('ok','✅ '+scopeName+'已全部处理完',
+      scopeDesc+'　相邻 K 线之间不存在任何包含关系。'
+      +'\n本次练习已合并 '+S.undo.length+' 次。'+extra, 0);
+    syncBtns();
+    return;
+  }
+
+  const k = Math.min(6, pend.length);
+  const lines = pend.slice(0,k).map(i=>{
+    const A=S.bars[i], B=S.bars[i+1], ad=autoDirFor(i);
+    return '· '+fmtDate(A.d)+' 与 '+fmtDate(B.dEnd||B.d)
+         +'　应按 '+(ad.dir==='up'?'向上 ⇅ 高高':'向下 ⇇ 低低')
+         +'（参照 '+(ad.aIdx>=0?fmtDate(S.bars[ad.aIdx].d):'无合格参照，方向靠延续')+'）';
+  });
+  if(pend.length>k) lines.push('· …另有 '+(pend.length-k)+' 处');
+
+  selectBar(pend[0]);                       /* 定位到第一处，方便直接接着练 */
+  note('err','✗ '+scopeName+'还有 '+pend.length+' 处包含关系没处理（已定位到第 1 处）',
+    scopeDesc+'　已合并 '+S.undo.length+' 次'
+    +'\n\n'+lines.join('\n')
+    +(isAll?'':'\n\n点选任意一根 K 线即可继续处理；左右拖动可换区段，「重置练习」清空全部合并。')
+    +'\n按 Esc 关闭', 0);
+  syncBtns();
+}
+
+function doMerge(){
+  if(S.sel==null || !S.bars[S.sel] || !S.bars[S.sel+1]) return;
+
+  /* 合并前先校验：包含关系 + （仅手动模式）方向是否正确 */
+  const chk=checkMergeable(S.sel);
+  if(!chk.ok){
+    S.flash=Date.now();
+    (function flashAnim(){                        /* 闪红/抖动需要逐帧重绘 */
+      if(S.flash && Date.now()-S.flash<720){ draw(); requestAnimationFrame(flashAnim); }
+      else { S.flash=0; draw(); }
+    })();
+    note('err','✗ 无法合并：'+chk.title, chk.detail, 0);
+    return;
+  }
+  hideNote();
+
+  const i=S.sel, A=S.bars[i], B=S.bars[i+1];
+  const ed=effectiveDir();
+  const m=mergedBar(A,B,S.frame.top,S.frame.bot,ed.dir);
+  const wasRightAnchored = (S.start >= S.bars.length - S.count - 1);
+
+  for(const e of S.undo){                       /* 重定基：让撤销链始终自洽 */
+    if(e.i===i) e.before.push(m);
+    else if(e.i>i) e.i-=1;
+  }
+  S.bars.splice(i,2,m);
+  S.undo.push({i, before:[A,B], after:m});
+  S.redo.length=0;
+
+  if(wasRightAnchored) S.start = S.bars.length - S.count;   /* 贴右：左侧 K 线右移一格 */
+  S.sel=null; S.frame=null;
+  refreshPending();
+  scale(); save(); syncBtns(); draw();
+  if(S.pending && !S.pending.length){              /* 刚好把最后一处也处理完了 */
+    note('ok','✅ 最后一处包含关系已处理完毕',
+      '当前 '+S.bars.length+' 根，全部相邻 K 线均无包含。'
+      +'\n可点顶部「✅ 完成检查」复核。', 0);
+  }
+  const cmp = ed.manual
+    ? '手动指定' + (ed.dir==='up'?'向上':'向下')
+    : '自动 ' + (ed.auto.aIdx>=0 ? ('b vs 参照a#'+ed.auto.aIdx+'：'+ed.auto.basis) : ed.auto.basis);
+  toast('已合并  '+fmtDate(A.d)+' + '+fmtDate(B.dEnd||B.d)
+       +'　'+cmp
+       +'　→ '+(ed.dir==='up'?'高高':'低低')
+       +'　高 '+dec(m.h)+'('+m.hiFrom+') 低 '+dec(m.l)+'('+m.loFrom+')  光头光脚');
+}
+function undo(){
+  const e=S.undo.pop(); if(!e){ toast('没有可撤销'); return; }
+  const rightWasAnchored = (S.start >= S.bars.length - S.count - 1);
+  S.bars.splice(e.i,1,...e.before);
+  S.redo.push(e);
+  if(rightWasAnchored) S.start = S.bars.length - S.count;
+  S.sel=null; S.frame=null;
+  refreshPending();
+  scale(); save(); syncBtns(); draw();
+  toast('已撤销  还原为 2 根');
+}
+function redo(){
+  const e=S.redo.pop(); if(!e){ toast('没有可重做'); return; }
+  const i=e.i, m=e.after, A=S.bars[i], B=S.bars[i+1];
+  for(const x of S.undo){ if(x.i===i) x.before.push(m); else if(x.i>i) x.i-=1; }
+  S.bars.splice(i,2,m); S.undo.push(e);
+  S.sel=null; S.frame=null;
+  refreshPending();
+  scale(); save(); syncBtns(); draw();
+  toast('已重做  合并生效');
+}
+function resetPractice(){
+  if(!S.undo.length){ toast('当前没有合并记录'); return; }
+  S.bars=S.base.slice(); S.undo=[]; S.redo=[]; S.sel=null; S.frame=null;
+  S.count=Math.min(S.count,S.bars.length);
+  S.start=Math.max(0,S.bars.length-S.count);
+  refreshPending();
+  save(); syncBtns(); draw(); toast('已重置：回到原始 '+(S.freq==='D'?'日K':'周K')+' 序列');
+}
+
+/* ---------------- 交互 ---------------- */
+function localPos(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; }
+function inPlot(x,y){ return x>PAD.l && x<W-PAD.r && y>PAD.t && y<H-PAD.b; }
+
+cv.addEventListener('mousedown', e=>{
+  if(e.button!==0) return;
+  const {x,y}=localPos(e);
+  S.down={x,y,mode:'none'};
+  /* pill → 合并 */
+  if(S.hit && inRect(x,y,S.hit.pill)){ S.down.mode='pill'; return; }
+  /* × → 取消 */
+  if(S.hit && S.sel!=null && inRect(x,y,S.hit.cancel)){ S.down.mode='cancel'; return; }
+  /* 框：上/下边微调，或框内整体平移 */
+  if(S.hit && S.sel!=null && S.hit.frame){
+    const f=S.hit.frame;
+    if(near(x,y,{x:f.x,y:f.y,w:f.w,h:1})){ S.down.mode='top'; return; }
+    if(near(x,y,{x:f.x,y:f.y+f.h,w:f.w,h:1})){ S.down.mode='bot'; return; }
+    if(inRect(x,y,f)){
+      S.down.mode='move'; S.down.p0=priceAt(y);
+      S.down.t0=S.frame.top; S.down.b0=S.frame.bot; return;
+    }
+  }
+  /* 其余 → 先按平移起手 */
+  S.down.mode='pan'; S.down.x0=x; S.down.s0=S.start;
+});
+
+window.addEventListener('mousemove', e=>{
+  const {x,y}=localPos(e); S.hover={x,y};
+  const d=S.down;
+  if(d){
+    const moved=Math.abs(x-d.x)+Math.abs(y-d.y)>3;
+    if(d.mode==='pan' && moved){
+      S.start=clamp(d.s0-Math.round((x-d.x0)/barW()),0,Math.max(0,S.bars.length-S.count));
+      draw(); syncBtns(); return;
+    }
+    if(moved && (d.mode==='top'||d.mode==='bot'||d.mode==='move')){
+      const {hi,lo}=selHiLo();
+      const p=priceAt(y);
+      if(d.mode==='top')     S.frame.top=snapTop(p,hi);
+      else if(d.mode==='bot')S.frame.bot=snapBot(p,lo);
+      else{
+        const dp=p-d.p0;
+        S.frame.top=snapTop(d.t0+dp,hi);
+        S.frame.bot=snapBot(d.b0+dp,lo);
+      }
+      draw(); return;
+    }
+  }
+  /* 光标形态 */
+  let c='crosshair';
+  if(S.hit){
+    if(inRect(x,y,S.hit.pill)) c='pointer';
+    else if(S.sel!=null){
+      const f=S.hit.frame;
+      if(f && (near(x,y,{x:f.x,y:f.y,w:f.w,h:1})||near(x,y,{x:f.x,y:f.y+f.h,w:f.w,h:1}))) c='ns-resize';
+      else if(f && inRect(x,y,f)) c='move';
+      else if(inRect(x,y,S.hit.cancel)) c='pointer';
+    }
+  }
+  cv.style.cursor=c;
+  updateTip(x,y);
+});
+
+window.addEventListener('mouseup', e=>{
+  const d=S.down; S.down=null; if(!d) return;
+  const p=localPos(e);
+  const moved=Math.abs(p.x-d.x)+Math.abs(p.y-d.y)>3;
+  if(d.mode==='pill'){ doMerge(); return; }
+  if(d.mode==='cancel'){ clearSel(); return; }
+  if(moved){ if(d.mode==='pan') save(); syncBtns(); draw(); return; }
+  if(d.mode==='pan'){
+    if(inPlot(d.x,d.y)){ scale(); selectBar(clamp(idxAt(d.x),0,S.bars.length-2)); }
+    else { clearSel(); }
+  }else{
+    save(); draw();
+  }
+});
+cv.addEventListener('wheel', e=>{
+  e.preventDefault();
+  if(S.sel!=null && e.shiftKey){          /* Shift+滚轮：微调框 */
+    const {hi,lo}=selHiLo();
+    const stepPx=(e.deltaY>0?1:-1)*2;
+    const d=priceAt(PAD.t+10)-priceAt(PAD.t+10+stepPx);
+    if(S.hover && S.hover.y < yOf(S.frame.top)) S.frame.top=snapTop(S.frame.top+d,hi);
+    else S.frame.bot=snapBot(S.frame.bot-d,lo);
+    draw(); save(); return;
+  }
+  const anchor=idxAt(localPos(e).x);
+  const f=e.deltaY>0?1.12:1/1.12;
+  const n=S.bars.length;
+  const newCount=clamp(Math.round(S.count*f),20,n);
+  const rel=(anchor-S.start)/S.count;
+  S.count=newCount;
+  S.start=clamp(Math.round(anchor-rel*S.count),0,Math.max(0,n-S.count));
+  scale(); save(); draw(); syncBtns();
+},{passive:false});
+
+window.addEventListener('keydown', e=>{
+  if(e.target.tagName==='SELECT') return;
+  const k=e.key.toLowerCase();
+  if(e.ctrlKey && k==='z'){ e.preventDefault(); undo(); return; }
+  if(e.ctrlKey && k==='y'){ e.preventDefault(); redo(); return; }
+  if(e.key==='Escape'){ if($('mask').classList.contains('on')) $('mask').classList.remove('on'); hideNote(); clearSel(); return; }
+  if(e.key==='Enter'){ if(S.sel!=null){ e.preventDefault(); doMerge(); } return; }
+  if(k==='r'){ S.count=Math.min(120,S.bars.length); S.start=Math.max(0,S.bars.length-S.count); draw(); syncBtns(); return; }
+  if(k==='f'){ e.preventDefault(); doDone(); return; }
+  if(k==='d'){ setDirMode(S.dirMode==='auto'?'up':(S.dirMode==='up'?'down':'auto')); return; }
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+    if(S.sel==null){
+      const i=Math.min(Math.max(0,S.bars.length-2), Math.min(S.bars.length-2, S.start+Math.floor(S.count/2)));
+      selectBar(i); e.preventDefault(); return;
+    }
+    const ni=clamp(S.sel+(e.key==='ArrowRight'?1:-1),0,S.bars.length-2);
+    selectBar(ni); e.preventDefault();
+  }
+});
+
+/* ---------------- 提示条 ---------------- */
+let toastT=null;
+function toast(msg){
+  let el=$('toast');
+  if(!el){
+    el=document.createElement('div'); el.id='toast';
+    el.style.cssText='position:absolute;left:50%;bottom:22px;transform:translateX(-50%);'
+      +'background:rgba(20,26,36,.96);border:1px solid #2a3444;color:#dfe6f0;padding:8px 16px;'
+      +'border-radius:8px;font-size:12.5px;z-index:9;box-shadow:0 8px 24px rgba(0,0,0,.5);'
+      +'font-variant-numeric:tabular-nums;white-space:nowrap';
+    document.querySelector('.wrap').appendChild(el);
+  }
+  el.textContent=msg; el.style.display='block';
+  clearTimeout(toastT); toastT=setTimeout(()=>el.style.display='none',2600);
+}
+
+/* ---------------- 校验 / 完成检查 结果框（多行，带标题） ---------------- */
+let noteT=null;
+const NOTE_CLR={err:['rgba(40,20,25,.97)','#7a2f39','#ffe1e1','#ff6b6b'],
+                ok: ['rgba(14,33,26,.97)','#1f7a54','#d6f6e6','#0ecb81']};
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function note(kind,title,detail,ms){
+  let el=$('note');
+  if(!el){
+    el=document.createElement('div'); el.id='note';
+    el.style.cssText='position:absolute;left:50%;top:14px;transform:translateX(-50%);max-width:min(880px,94%);'
+      +'padding:11px 17px;border-radius:10px;font-size:12.5px;z-index:11;line-height:1.75;'
+      +'box-shadow:0 12px 34px rgba(0,0,0,.55);font-variant-numeric:tabular-nums;'
+      +'white-space:pre-wrap;text-align:left;pointer-events:none';
+    document.querySelector('.wrap').appendChild(el);
+  }
+  const c=NOTE_CLR[kind]||NOTE_CLR.err;
+  el.style.background=c[0]; el.style.border='1px solid '+c[1]; el.style.color=c[2];
+  el.innerHTML='<div style="color:'+c[3]+';font-weight:700;font-size:13px;margin-bottom:3px">'+esc(title)+'</div>'
+              +(detail?'<div>'+esc(detail)+'</div>':'')
+              +'<div style="margin-top:5px;color:#7d8a9c;font-size:11px">'+(ms===0?'按 Esc 关闭':'按 Esc 关闭')+'</div>';
+  el.style.display='block';
+  clearTimeout(noteT);
+  if(ms!==0) noteT=setTimeout(()=>{ el.style.display='none'; }, ms||5200);
+}
+function hideNote(){ const el=$('note'); if(el){ clearTimeout(noteT); el.style.display='none'; } }
+
+/* ---------------- 控件 ---------------- */
+function setDirMode(m){
+  S.dirMode=m;
+  [...$('dirSeg').children].forEach(x=>x.classList.toggle('on', x.dataset.d===m));
+  if(S.sel!=null){                      /* 方向变了，框要按新规则重算 */
+    const {hi,lo}=selHiLo();
+    S.frame={top:hi, bot:lo};
+  }
+  save(); syncBtns(); draw();
+  toast(m==='auto'
+    ? '方向 = 自动：b 与其左侧参照 a（与 b 无包含）比 — g_b>g_a 向上(高高)，d_b<d_a 向下(低低)'
+    : '方向 = 手动'+(m==='up'?' 向上 ⇅ 高高（取两根中较高的高 + 较高的低）'
+                          :' 向下 ⇇ 低低（取两根中较低的高 + 较低的低）'));
+}
+function syncBtns(){
+  $('undoBtn').disabled = !S.undo.length;
+  $('redoBtn').disabled = !S.redo.length;
+  const merged=S.undo.length;
+  const selTxt = S.sel!=null && S.bars[S.sel]
+    ? '　已选 <b>#'+S.sel+'</b> '+fmtDate(S.bars[S.sel].d)
+    : '';
+  let dirTxt;
+  if(S.sel!=null && S.bars[S.sel] && S.bars[S.sel+1]){
+    const ed=effectiveDir();
+    dirTxt = '　方向 <span class="'+(ed.dir==='up'?'up':'dn')+'">'+(ed.manual?'手动':'自动')
+             +(ed.dir==='up'?' ⇅ 高高':' ⇇ 低低')+'</span>'
+             +(!ed.manual && ed.auto && ed.auto.aIdx>=0 ? '　<span style="color:#6f7d91">b vs a#'+ed.auto.aIdx+'</span>' : '');
+  }else{
+    dirTxt = '　方向 '+(S.dirMode==='auto'?'<span class="m">自动</span>':(S.dirMode==='up'?'<span class="up">手动 ⇅</span>':'<span class="dn">手动 ⇇</span>'));
+  }
+  $('stat').innerHTML='区间 <b>'+(S.start+S.count)+'</b> / '+S.bars.length+' 根　'
+    +'可见 <b>'+S.count+'</b> 根　'
+    +(merged?'已合并 <span class="m">'+merged+'</span> 次　':'')+dirTxt+selTxt;
+
+  /* 「完成检查」按钮：实时显示当前范围内还剩几处未处理 */
+  const btn=$('doneBtn');
+  if(btn){
+    refreshPending();                 /* 视窗/根数可能刚变，always 重算 */
+    const n=S.pending.length;
+    const scope = S.doneScope==='all' ? '全序列 '+S.bars.length+' 根' : '当前视窗 '+Math.max(0,viewRange()[1]-viewRange()[0])+' 根';
+    btn.textContent = n ? '✅ 完成检查 · 剩 '+n : '✅ 完成检查 · 全清';
+    btn.style.color = n ? '#ffb020' : '#0ecb81';
+    btn.style.borderColor = n ? 'rgba(255,176,32,.55)' : 'rgba(14,203,129,.5)';
+    btn.title = n
+      ? (scope+' 中，还有 '+n+' 处相邻包含关系没处理。点我看清单并定位到第一处（F）')
+      : (scope+' 已无任何相邻包含关系 —— 这段练完了（F）');
+  }
+}
+function buildIdxSel(){
+  const sel=$('idxSel');
+  sel.innerHTML=Object.keys(DATA.indices).map(k=>
+    '<option value="'+k+'">'+DATA.indices[k].name+'  '+DATA.indices[k].code+'</option>').join('');
+  sel.value=S.sym;
+  sel.onchange=()=>{ S.sym=sel.value; S.bodyMode=S.bodyMode; loadIdx(); draw(); };
+}
+$('freqSeg').onclick=e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b));
+  S.freq=b.dataset.f; loadIdx(); draw();
+};
+$('bodySeg').onclick=e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b));
+  S.bodyMode=b.dataset.b; save(); draw();
+};
+$('dirSeg').onclick=e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  setDirMode(b.dataset.d);
+};
+$('rangeSel').onchange=e=>{
+  S.count=+e.target.value; S.start=Math.max(0,S.bars.length-S.count);
+  scale(); save(); draw(); syncBtns();
+};
+$('undoBtn').onclick=undo;
+$('redoBtn').onclick=redo;
+$('resetBtn').onclick=()=>{
+  if(confirm('重置会把本指数的全部合并记录清空，回到原始序列。继续？')) resetPractice();
+};
+$('doneBtn').onclick=doDone;
+$('scopeBtn').onclick=()=>setScope(S.doneScope==='all'?'view':'all');
+$('helpBtn').onclick=()=>$('mask').classList.add('on');
+$('mask').onclick=e=>{ if(e.target===$('mask')) $('mask').classList.remove('on'); };
+$('maskClose').onclick=()=>$('mask').classList.remove('on');
+
+new ResizeObserver(()=>draw()).observe(cv);
+
+/* ---------------- 启动 ---------------- */
+function boot(){
+ try{ _boot(); }
+ catch(e){
+   console.error('boot failed:', e);
+   const r=cv.getBoundingClientRect();
+   layout();
+   ctx.fillStyle='#f3453f'; ctx.font='13px system-ui,sans-serif';
+   ctx.textAlign='left'; ctx.textBaseline='top';
+   ctx.fillText('初始化失败：'+(e&&e.message||e), 16, 16);
+ }
+}
+function _boot(){
+  buildIdxSel();
+  $('srcTxt').textContent = DATA.meta.source + '　抓取于 ' + DATA.meta.generated_at + '　起 ' + DATA.meta.start;
+  loadIdx();
+  $('rangeSel').value=String(S.count);
+  [...$('freqSeg').children].forEach(x=>x.classList.toggle('on', x.dataset.f===S.freq));
+  [...$('dirSeg').children].forEach(x=>x.classList.toggle('on', x.dataset.d===S.dirMode));
+  [...$('bodySeg').children].forEach(x=>x.classList.toggle('on', x.dataset.b===S.bodyMode));
+  $('scopeBtn').textContent = '范围：'+(S.doneScope==='all'?'全序列':'视窗内');
+  if(!S.bars.length){ ctx.fillStyle='#f3453f'; ctx.fillText('数据为空',40,60); return; }
+  draw(); syncBtns();
+  setTimeout(()=>toast('① 点一根 K 线开始练习　·　顶部「? 帮助」看完整规则'),500);
+}
+boot();
+</script>
+</body>
+</html>
