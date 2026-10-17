@@ -49,6 +49,16 @@ them before committing to a full run.
    it worked. Measured: full-bleed cuts 0.15–0.29, chrome-heavy cuts as low as
    0.076, intra-shot noise below 0.005. Default 0.06 passes both.
 
+   **Then check that noise floor against the 0.005 assumption.** Large burned-in
+   captions break it: when a subtitle line spans most of the frame width, every
+   new caption scores ~0.065 on its own, which sits *right on* the 0.06 default —
+   so each real slide gets sliced into fragments whose frames are identical.
+   Symptom: stage 1's `strengths` line shows a crowd of scores evenly spread over
+   0.05–0.08. Fix: pass `--scene-mask-bottom` equal to `--sub-band` (e.g. `0.20`).
+   It crops the bottom before *scoring* only; keyframes still come from the full
+   frame. Measured on a 5:43 lecture: floor 0.0395 → 0.0078, cuts 65 → 15 for 14
+   real changes, distribution turning bimodal with a 3× gap underneath.
+
 2. **Run the mechanical pipeline.**
    `python scripts/pipeline.py <video> --out <dir>`
    This does scene-split → contact sheets → vision keyframe pick → per-segment
@@ -103,6 +113,10 @@ Do not produce a .pptx. The HTML is the deliverable.
 - **Segments much longer than the slide count suggests** → raise
   `--scene-threshold` (0.20–0.25) to ignore animated builds, or lower
   `--min-segment` if genuine short slides are being merged.
+- **Far more segments than visible slides, and neighbouring segments show the
+  same slide** → the noise floor is above the threshold, almost always because
+  the caption band is large. Add `--scene-mask-bottom 0.20` (match it to
+  `--sub-band`) rather than raising the threshold, which would also lose real cuts.
 - **No subtitles detected** → the band is wrong. Measure it: crop candidates and
   look, or adjust `--sub-band` (default `0.20`, measured as 0.198–0.202 across
   three frames of a real lecture). If the video truly has no captions, the deck

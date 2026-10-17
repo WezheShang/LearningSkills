@@ -82,18 +82,30 @@ _SCORE = re.compile(r"lavfi\.scene_score=([0-9.]+)")
 DEFAULT_SCENE_THRESHOLD = 0.06
 
 
-def detect_cuts(video, threshold, max_seconds=3600):
+def detect_cuts(video, threshold, max_seconds=3600, mask_bottom=0.0):
     """Scene-boundary timestamps via ffmpeg's `scene` variable (0-1 scale).
 
     Uses metadata=print so we get the score alongside each timestamp, which
     makes the cut list inspectable and tunable after the fact.
+
+    `mask_bottom` crops that fraction off the bottom BEFORE scoring. A burned-in
+    subtitle band changes on every spoken line, and on decks with large caption
+    text it alone lifts the score to ~0.065 -- right on top of a sane threshold,
+    so it masquerades as slide changes. Measured on a 5:43 lecture: unmasked,
+    the noise floor sat at 0.065 and cut 65 times; masked, the floor dropped to
+    0.008 and the 14 real cuts stood at >=0.0965 with a 3x gap below them.
+    Frame extraction is unaffected -- this only changes what gets *scored*.
     """
+    pre = ""
+    if mask_bottom > 0:
+        keep = max(0.05, 1.0 - mask_bottom)
+        pre = f"crop=iw:ih*{keep:.6f}:0:0,"
     code, out, err = run([
         "ffmpeg", "-hide_banner", "-nostats", "-loglevel", "info",
         "-t", str(max_seconds),
         "-i", video,
         "-an", "-sn", "-dn",
-        "-filter:v", f"select='gt(scene,{threshold})',metadata=print:file=-",
+        "-filter:v", f"{pre}select='gt(scene,{threshold})',metadata=print:file=-",
         "-fps_mode", "passthrough",
         "-f", "null", "-",
     ])
@@ -245,15 +257,17 @@ def attach_transcript(segments, lines):
 # -------------------------------------------------------------------- main
 
 def build(video, out_dir, scene_threshold, min_len, max_segments, k_frames,
-          width, do_transcript, whisper_model, language):
+          width, do_transcript, whisper_model, language, scene_mask_bottom=0.0):
     os.makedirs(out_dir, exist_ok=True)
     info = probe(video)
     print(f"[1/6] probe      {info['duration']:.2f}s  {info['width']}x{info['height']}"
           f"  {info['fps']:.3f}fps", flush=True)
 
-    hits = detect_cuts(video, scene_threshold)
+    hits = detect_cuts(video, scene_threshold, mask_bottom=scene_mask_bottom)
     cuts = [t for t, _s in hits]
-    print(f"[2/6] scene cuts {len(cuts)} detected @ threshold {scene_threshold}", flush=True)
+    mask_note = f"  (bottom {scene_mask_bottom:.0%} masked out)" if scene_mask_bottom > 0 else ""
+    print(f"[2/6] scene cuts {len(cuts)} detected @ threshold {scene_threshold}{mask_note}",
+          flush=True)
     if hits:
         shown = ", ".join(f"{t:.2f}s({s:.3f})" for t, s in hits[:8])
         print(f"      strengths  {shown}{' ...' if len(hits) > 8 else ''}", flush=True)
@@ -309,6 +323,7 @@ def build(video, out_dir, scene_threshold, min_len, max_segments, k_frames,
         "probe": info,
         "params": {
             "scene_threshold": scene_threshold,
+            "scene_mask_bottom": scene_mask_bottom,
             "min_segment_seconds": min_len,
             "max_segments": max_segments,
             "candidates_per_segment": k_frames,
@@ -337,6 +352,13 @@ def main():
                          "build animations")
     ap.add_argument("--min-segment", type=float, default=4.0,
                     help="shots shorter than this get merged away")
+    ap.add_argument("--scene-mask-bottom", type=float, default=0.0,
+                    help="fraction of the frame bottom to ignore when SCORING "
+                         "scene changes (0 = off). Set this to your --sub-band "
+                         "when burned-in captions are large: every new caption "
+                         "line otherwise reads as a slide change. Measured on a "
+                         "5:43 lecture -- noise floor 0.065 unmasked vs 0.008 "
+                         "masked, cuts 65 vs 14. Frame extraction unaffected.")
     ap.add_argument("--max-segments", type=int, default=40)
     ap.add_argument("--candidates", type=int, default=3,
                     help="keyframes extracted per segment for the VLM to choose from")
@@ -354,6 +376,7 @@ def main():
         args.video, args.out, args.scene_threshold, args.min_segment,
         args.max_segments, args.candidates, args.width,
         not args.no_transcript, args.whisper_model, args.language,
+        args.scene_mask_bottom,
     )
 
     print("\n--- segments ---")

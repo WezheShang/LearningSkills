@@ -114,6 +114,10 @@ def main():
     ap.add_argument("--candidates", type=int, default=3)
     ap.add_argument("--sub-band", default="0.20",
                     help="subtitle band height as a fraction of frame height")
+    ap.add_argument("--scene-mask-bottom", type=float, default=0.0,
+                    help="same fraction, but ignored when SCORING scene cuts so "
+                         "caption lines are not mistaken for slide changes; "
+                         "set it equal to --sub-band for large burned-in captions")
     ap.add_argument("--sub-per", type=float, default=4.0)
     ap.add_argument("--sub-max", type=int, default=12)
     ap.add_argument("--skip-subs", action="store_true")
@@ -134,6 +138,7 @@ def main():
 
     run("video_storyboard.py", video, "--out", out, "--no-transcript",
         "--scene-threshold", args.scene_threshold,
+        "--scene-mask-bottom", args.scene_mask_bottom,
         "--min-segment", args.min_segment,
         "--max-segments", args.max_segments,
         "--candidates", args.candidates,
