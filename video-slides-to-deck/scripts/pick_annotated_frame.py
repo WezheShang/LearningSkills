@@ -65,10 +65,35 @@ DARK_MAX = 60        # luminance below this counts as chart background
 BRIGHT_MIN = 95      # luminance above this counts as marks on a dark chart
 RED_MIN = 110        # channel level for "this pixel is red"
 RED_DOMINANCE = 55   # how far red must exceed green/blue to count as red ink
+PALE_MIN = 175     # luminance a dialog pixel must reach
+PALE_SPREAD = 18   # max(max-min) allowed -> essentially grey
+PALE_MAX = 0.035   # measured: annotated charts 0.001-0.018, a modal dialog 0.070
+
+
+def pale_frac(crop):
+    """Share of the frame that is bright AND grey -- i.e. a dialog background.
+
+    A Windows dialog is a large near-grey rectangle, so it scores high. Chart
+    content does not: candles are saturated, pen strokes are red or thin white
+    lines on black. Measured on this material, annotated charts land in
+    0.001-0.018 and a dialog-covered frame scores 0.070, so the two window types
+    separate cleanly with room on both sides of 0.035.
+
+    An earlier attempt scored occlusion instead (how much of the frame's bright
+    mass sits in the centre) and had to be discarded: charts concentrate their
+    candles centrally too, so good frames scored 0.50-0.89 and the dialog only
+    0.92 -- no usable gap. Measure before trusting a threshold, not after.
+    """
+    r, g, b = crop.split()
+    mx = ImageChops.lighter(ImageChops.lighter(r, g), b)
+    mn = ImageChops.darker(ImageChops.darker(r, g), b)
+    grey = ImageChops.subtract(mx, mn).point(lambda v: 255 if v <= PALE_SPREAD else 0)
+    lit = crop.convert("L").point(lambda v: 255 if v >= PALE_MIN else 0)
+    return ImageChops.darker(grey, lit).histogram()[255] / float(crop.size[0] * crop.size[1])
 
 
 def analyse(path):
-    """Return (dark_frac, bright_frac, red_frac) over the content area.
+    """Return (dark_frac, bright_frac, red_frac, pale_frac) over the content area.
 
     A dark chart window is recognised by `dark_frac`: its background is nearly
     black. On such a frame, `bright_frac` grows as pen strokes and labels are
@@ -81,7 +106,7 @@ def analyse(path):
     crop = im.crop((0, int(h * CHROME_TOP), w, int(h * CHROME_BOTTOM)))
     n = crop.size[0] * crop.size[1]
     if not n:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
     gray = crop.convert("L").histogram()
     dark_frac = sum(gray[:DARK_MAX + 1]) / float(n)
@@ -97,7 +122,7 @@ def analyse(path):
         red = ImageChops.darker(red, mask(ImageChops.subtract(r, chan), RED_DOMINANCE))
     red_frac = red.histogram()[255] / float(n)
 
-    return dark_frac, bright_frac, red_frac
+    return dark_frac, bright_frac, red_frac, pale_frac(crop)
 
 
 def main(argv=None):
@@ -118,6 +143,9 @@ def main(argv=None):
                     help="dark_frac above which a frame counts as chart-dominant; "
                          "used to separate a dark chart from a light mind-map panel "
                          "(default 0.35)")
+    ap.add_argument("--pale-max", type=float, default=0.035,
+                    help="reject candidates whose bright-grey (dialog-like) area exceeds "
+                         "this fraction of the frame (default 0.035)")
     args = ap.parse_args(argv)
 
     segmap = json.load(open(args.segmap, encoding="utf-8"))
@@ -154,11 +182,21 @@ def main(argv=None):
         # Two-tier: prefer a chart window and rank by marks on a dark background;
         # only when the whole segment is mind-map panel does red ink decide.
         chart = [c for c in cand if c[1] >= args.chart_dark]
+
+        # Reject dialog-blocked frames -- but only inside the chart tier. A
+        # light mind-map panel is itself bright and grey, so applying this to
+        # panel frames rejects every one of them; and a dialog on a panel covers
+        # less of the lesson than a dialog on the chart does.
         if chart:
+            clean = [c for c in chart if c[4] <= args.pale_max]
+            dropped = len(chart) - len(clean)
+            if clean:
+                chart = clean
             window = "chart"
             scored = [(c[2], c[0]) for c in chart]          # (bright_frac, t)
         else:
             window = "panel"
+            dropped = 0
             scored = [(c[3], c[0]) for c in cand]           # (red_frac, t)
         scored.sort(reverse=True)
         best_score, best_t = scored[0]
@@ -169,10 +207,15 @@ def main(argv=None):
         picks.append({"name": seg["name"], "time": round(best_t, 2),
                       "window": window, "score": round(best_score, 5),
                       "spread": round(spread, 5),
+                      "pale_dropped": dropped,
                       "path": dest, "start": lo, "end": hi})
-        print("%-4s %-13s %-8s %-8.4f %-7.4f %6.1fs"
+        print("%-4s %-13s %-8s %-8.4f %-7.4f %6.1fs%s"
               % (seg["name"], "%.0f-%.0fs" % (lo, hi), window, best_score,
-                 spread, best_t))
+                 spread, best_t,
+                 "   (dropped %d blocked)" % dropped if dropped else ""))
+        if dropped:
+            sys.stderr.write("NOTE: %s: %d/%d candidates had a modal dialog blocking "
+                             "the view and were skipped\n" % (seg["name"], dropped, n))
 
     with open(os.path.join(args.out, "frames.json"), "w", encoding="utf-8") as fh:
         json.dump(picks, fh, ensure_ascii=False, indent=1)

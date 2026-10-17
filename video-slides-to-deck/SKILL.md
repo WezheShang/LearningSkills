@@ -172,6 +172,17 @@ sprite, not with a handful of hand-picked frames.
    on a real 16-minute series: 7 of 8 segments resolve to chart frames, and the
    intro legitimately stays on the panel.
 
+   It also drops **modal-dialog candidates** (a settings popup covering the
+   chart), which otherwise win: a dialog is bright, so it inflates the very
+   score meant to reward pen strokes. Detection is "share of the frame that is
+   bright *and* grey" — measured 0.001–0.018 on annotated charts versus 0.070
+   on a dialog. Two things this taught: measure a heuristic's distribution on
+   known-good and known-bad frames before trusting a threshold (a first attempt
+   using centre-concentration of bright pixels looked reasonable and had *no*
+   separating power — good frames scored 0.50–0.89, the dialog only 0.92), and
+   apply the test only to chart-type frames, because a white mind-map panel is
+   itself bright and grey and would be rejected wholesale.
+
    Then **look at every frame you picked** before writing its caption.
 
 3. **Write `notes.json`** — titles, self-sufficient summaries (same standard as
