@@ -184,6 +184,12 @@ sprite, not with a handful of hand-picked frames.
    itself bright and grey and would be rejected wholesale.
 
    Then **look at every frame you picked** before writing its caption.
+   If the current model cannot read images directly, do it through the
+   `mcode-tools` vision channel — `upload_temp_url` + one
+   `describe_images` call per frame, with an objective-inventory prompt.
+   Full recipe (args format, anti-hallucination prompt, retry ladder,
+   ffmpeg probe with `-update 1`, watermark exclusion, batch-worker
+   orchestration): `references/vision-channel.md`.
 
 3. **Write `notes.json`** — titles, self-sufficient summaries (same standard as
    step 3 above), core points, meta, and `note_paragraphs` telling the reader how
