@@ -118,6 +118,23 @@ them before committing to a full run.
 
 Do not produce a .pptx. The HTML is the deliverable.
 
+### Per-segment video-jump links
+
+Every TOC entry and every segment header carries a direct "jump to the source
+video at this point" link. The TOC row has a separate "跳视频 ↗" button next
+to the in-page anchor; the segment header's time label (`x:y → x:y · Ns`) is
+a single `<a>` that opens the source URL in a new tab. URL formats handled:
+
+| Source            | Jump URL pattern              |
+|-------------------|-------------------------------|
+| Bilibili BV/AV    | `?p=N&t=N` (or `&t=N`) — preserves `?p=` |
+| YouTube           | `&t=Ns`                       |
+| Anything else     | `#t=N` (fragment fallback)    |
+
+The source URL comes from `meta.url` (Branch A) / `notes.url` (Branch B) and
+`seg.start` / `s["start"]` in seconds. The link is omitted silently when the
+source URL is empty — do not invent a hostname.
+
 ## Branch B — topic-split notes (screen recordings and other non-slide video)
 
 Branch A above is the default. Use this branch when the frame check said "not a

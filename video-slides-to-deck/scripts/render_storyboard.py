@@ -17,9 +17,32 @@ import html
 import json
 import mimetypes
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+# -------- video seek link --------------------------------------------------
+
+def video_jump(url, t):
+    """Build a URL that jumps to the source video at second ``t``.
+
+    B 站: ``?p=N&t=N`` (preserves any existing p=), YouTube: ``&t=Ns``,
+    anything else falls back to ``#t=N``. Strips a pre-existing t= so calls
+    don't stack, and rounds to int seconds.
+    """
+    if not url:
+        return None
+    base = url.partition("#")[0]
+    base = re.sub(r"([?&])t=[^&]*", "", base).rstrip("?&")
+    if "bilibili.com" in base:
+        sep = "&" if "?" in base else "?"
+        return "%s%st=%d" % (base, sep, int(t))
+    if "youtube.com" in base or "youtu.be" in base:
+        sep = "&" if "?" in base else "?"
+        return "%s%st=%ds" % (base, sep, int(t))
+    return "%s#t=%d" % (base, int(t))
 
 
 # --------------------------------------------------------------------- utils
@@ -111,7 +134,14 @@ body{background:var(--bg);color:var(--ink);
 .toc ol{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));
   gap:7px 26px;list-style:none;counter-reset:t}
 .toc li{counter-increment:t;font-size:13.5px;line-height:1.45}
-.toc a{color:#b9c1d4;text-decoration:none;display:flex;gap:9px;align-items:baseline}
+.toc li{display:flex;align-items:baseline;gap:10px}
+.toc li a.jmp{margin-left:auto;display:inline-flex;align-items:center;color:var(--accent2);
+ text-decoration:none;font:600 11px/1 ui-monospace,monospace;letter-spacing:.4px;
+ padding:3px 8px;border:1px solid #2c3549;border-radius:6px;transition:all .15s;
+ white-space:nowrap}
+.toc li a.jmp:hover{color:#fff;border-color:var(--accent);background:rgba(91,140,255,.12)}
+.toc li a.jmp::before{content:"↗ ";font-weight:700}
+.toc a{color:#b9c1d4;text-decoration:none;display:flex;gap:9px;align-items:baseline;flex:1;min-width:0}
 .toc a:hover{color:#fff}
 .toc a::before{content:counter(t,decimal-leading-zero);color:#5c6379;
   font-variant-numeric:tabular-nums;font-size:12px;flex:none}
@@ -132,6 +162,10 @@ body{background:var(--bg);color:var(--ink);
   display:flex;justify-content:space-between;align-items:baseline;flex:none}
 .num span{color:#6d7488;letter-spacing:.2px;font-weight:600;
   font-variant-numeric:tabular-nums}
+.num a.sl{color:#9aa0b0;text-decoration:none;letter-spacing:.2px;font-weight:600;
+  font-variant-numeric:tabular-nums;border-bottom:1px dashed transparent;
+  transition:color .15s,border-bottom-color .15s}
+.num a.sl:hover{color:var(--accent2);border-bottom-color:var(--accent2)}
 .side h2{font-size:clamp(17px,1.95vw,25px);line-height:1.26;letter-spacing:-.3px;
   flex:none;color:#fff}
 .tag{display:inline-block;font-size:11px;color:var(--gold);background:rgba(232,180,74,.12);
@@ -214,6 +248,7 @@ def render_overview(sb, out_id="deck"):
     dur = sb.get("probe", {}).get("duration", 0)
     segs = sb["segments"]
     points = meta.get("core_points") or []
+    url = meta.get("url")
 
     parts = ['<div class="ov">']
     parts.append('<span class="kicker">VIDEO STORYBOARD</span>')
@@ -228,7 +263,6 @@ def render_overview(sb, out_id="deck"):
         for i, b in enumerate(bits))
     parts.append(f'<div class="meta">{meta_html}</div>')
 
-    url = meta.get("url")
     if url:
         parts.append(
             f'<div class="meta"><a class="srclink" href="{html.escape(url, quote=True)}" '
@@ -246,24 +280,37 @@ def render_overview(sb, out_id="deck"):
     parts.append('<div class="toc"><h2>目录</h2><ol>')
     for s in segs:
         t = s.get("title") or f"段落 {s['index']}"
-        parts.append(
-            f'<li><a href="#{out_id}{s["index"]:03d}">'
-            f'<span class="tt">{ts(s["start"])}</span><span>{esc(t)}</span></a></li>')
+        jump = video_jump(url, s["start"])
+        parts.append(f'<li><a href="#{out_id}{s["index"]:03d}">'
+                     f'<span class="tt">{ts(s["start"])}</span><span>{esc(t)}</span></a>')
+        if jump:
+            parts.append(
+                f'<a class="jmp" href="{html.escape(jump, quote=True)}" '
+                f'target="_blank" rel="noopener" '
+                f'title="跳到原视频该段位置（{ts(s["start"])}）">跳视频</a>')
+        parts.append('</li>')
     parts.append("</ol></div>")
 
     parts.append("</div>")
     return "".join(parts)
 
 
-def render_slide(s, dur):
+def render_slide(s, dur, url=None):
     pct = (s["duration"] / dur * 100) if dur else 0
     uri = data_uri(s.get("keyframe") or (s.get("candidates") or [{}])[0].get("path"))
     shot = (f'<img src="{uri}" alt="">' if uri
             else '<div style="color:#6d7488;padding:20px">no keyframe</div>')
 
     title = esc(s.get("title")) or f"段落 {s['index']}"
-    bits = [f'<div class="num"><span>SEGMENT {s["index"]:02d}</span>'
-            f'<span>{ts(s["start"])} → {ts(s["end"])} · {s["duration"]:.0f}s</span></div>']
+    time_str = f'{ts(s["start"])} → {ts(s["end"])} · {s["duration"]:.0f}s'
+    jump = video_jump(url, s["start"])
+    if jump:
+        time_html = (f'<a class="sl" href="{html.escape(jump, quote=True)}" '
+                     f'target="_blank" rel="noopener" '
+                     f'title="跳到原视频该段位置（{ts(s["start"])}）">{time_str}</a>')
+    else:
+        time_html = f'<span>{time_str}</span>'
+    bits = [f'<div class="num"><span>SEGMENT {s["index"]:02d}</span>{time_html}</div>']
 
     if s.get("tags"):
         bits.append("".join(f'<span class="tag">{esc(t)}</span>' for t in s["tags"]))
@@ -306,7 +353,7 @@ def render_html(sb, out_path):
            '<meta name="viewport" content="width=device-width,initial-scale=1">',
            f"<title>{esc(title)}</title>", f"<style>{CSS}</style></head><body>",
            '<div class="wrap">', render_overview(sb)]
-    out += [render_slide(s, dur) for s in segs]
+    out += [render_slide(s, dur, (sb.get("meta") or {}).get("url")) for s in segs]
     out.append(f"</div><script>{JS}</script></body></html>")
 
     with open(out_path, "w", encoding="utf-8") as fh:

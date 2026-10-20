@@ -57,6 +57,30 @@ import os
 import re
 import sys
 
+
+# -------- video seek link --------------------------------------------------
+
+def video_jump(url, t):
+    """Build a URL that jumps to the source video at second ``t``.
+
+    Returns None when ``url`` is empty. The B 站 player accepts ``?t=<sec>``
+    alongside ``?p=<p>``; YouTube wants ``&t=<sec>s``; anything else falls back
+    to ``#t=<sec>``. We strip any pre-existing ``t=`` so successive calls do
+    not stack, and round to an integer second because every player we care
+    about rounds internally anyway.
+    """
+    if not url:
+        return None
+    base = url.partition("#")[0]
+    base = re.sub(r"([?&])t=[^&]*", "", base).rstrip("?&")
+    if "bilibili.com" in base:
+        sep = "&" if "?" in base else "?"
+        return "%s%st=%d" % (base, sep, int(t))
+    if "youtube.com" in base or "youtu.be" in base:
+        sep = "&" if "?" in base else "?"
+        return "%s%st=%ds" % (base, sep, int(t))
+    return "%s#t=%d" % (base, int(t))
+
 CSS = """
 :root{--bg:#0b0d12;--card:#141824;--line:#252b3a;--fg:#e8ecf6;--dim:#9aa3b8;--accent:#5B8CFF}
 *{box-sizing:border-box}
@@ -79,14 +103,25 @@ h2.sec{font-size:17px;color:#ffd479;margin:38px 0 14px;letter-spacing:.02em}
 .shot{width:100%;border:1px solid var(--line);border-radius:10px;margin:16px 0 0;display:block}
 .cap{color:var(--dim);font-size:12.5px;margin:7px 0 0;line-height:1.6}
 .toc{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:7px 26px;margin:6px 0}
-.toc a{display:flex;gap:10px;align-items:baseline;color:#c3cbdd;text-decoration:none;
- font-size:14px;padding:5px 0;border-bottom:1px solid #1b2130}
-.toc a:hover{color:#fff}
-.toc .tt{color:#6d7488;font:12px ui-monospace,monospace;flex:none}
+.toc-row{display:flex;align-items:baseline;gap:10px;padding:5px 0;border-bottom:1px solid #1b2130}
+.toc-row .toc-link{flex:1;min-width:0;display:flex;gap:10px;align-items:baseline;
+ color:#c3cbdd;text-decoration:none;font-size:14px}
+.toc-row .toc-link:hover{color:#fff}
+.toc-row .tt{color:#6d7488;font:12px ui-monospace,monospace;flex:none}
+.toc-row .tt-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toc-row .jmp{flex:none;display:inline-flex;align-items:center;gap:3px;
+ color:var(--accent);text-decoration:none;padding:3px 9px;
+ font:600 11px/1 ui-monospace,monospace;letter-spacing:.5px;
+ border:1px solid #2c3549;border-radius:6px;transition:all .15s;
+ white-space:nowrap}
+.toc-row .jmp:hover{color:#fff;border-color:var(--accent);background:rgba(91,140,255,.12)}
+.toc-row .jmp::before{content:"↗ ";font-weight:700}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:20px 0}
 .hd{display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
 .hd .tag{color:var(--accent);font:700 11px ui-monospace,monospace;letter-spacing:.12em}
 .hd .sp{color:var(--dim);font:12.5px ui-monospace,monospace}
+.card a.sp{color:var(--dim);text-decoration:none;border-bottom:1px dashed transparent}
+.card a.sp:hover{color:var(--accent);border-bottom-color:var(--accent)}
 .card h3{margin:0;font-size:21px;line-height:1.4}
 .sum{margin:14px 0 0;color:#dde2ef;font-size:15px;line-height:1.8}
 .sum b{color:#ffd479;font-weight:600}
@@ -260,16 +295,32 @@ def render(segmap, notes, root):
     a('<h2 class="sec">目录</h2><nav class="toc">')
     for seg in segmap:
         st = (notes["sections"].get(seg["name"]) or {}).get("title", seg["name"])
-        a('<a href="#s%s"><span class="tt">%s</span>%s</a>'
+        jump = video_jump(notes.get("url"), seg["start"])
+        a('<div class="toc-row">')
+        a('<a class="toc-link" href="#%s"><span class="tt">%s</span>'
+          '<span class="tt-text">%s</span></a>'
           % (seg["name"], fmt(seg["start"]), esc(st)))
+        if jump:
+            a('<a class="jmp" href="%s" target="_blank" rel="noopener" '
+              'title="跳到原视频该段位置（%s）">跳视频</a>'
+              % (html.escape(jump, quote=True), fmt(seg["start"])))
+        a('</div>')
     a("</nav>")
 
     for seg in segmap:
         entry = notes["sections"].get(seg["name"]) or {}
-        a('<section class="card" id="s%s">' % seg["name"])
-        a('<div class="hd"><h3>%s</h3><span class="sp">%s → %s · %ds</span></div>'
-          % (esc(entry.get("title", "")), fmt(seg["start"]), fmt(seg["end"]),
-             int(seg["end"] - seg["start"])))
+        jump = video_jump(notes.get("url"), seg["start"])
+        sp_inner = "%s → %s · %ds" % (
+            fmt(seg["start"]), fmt(seg["end"]), int(seg["end"] - seg["start"]))
+        if jump:
+            sp = ('<a class="sp" href="%s" target="_blank" rel="noopener" '
+                  'title="跳到原视频该段位置（%s）">%s</a>'
+                  % (html.escape(jump, quote=True), fmt(seg["start"]), sp_inner))
+        else:
+            sp = '<span class="sp">%s</span>' % sp_inner
+        a('<section class="card" id="%s">' % seg["name"])
+        a('<div class="hd"><h3>%s</h3>%s</div>'
+          % (esc(entry.get("title", "")), sp))
         img = entry.get("image")
         if img:
             full = img if os.path.isabs(img) else os.path.join(root, img)
