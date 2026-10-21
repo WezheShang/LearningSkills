@@ -109,3 +109,36 @@ pushes real cut scores far lower than a full-bleed change does. Set the threshol
 too high and you get **zero** cuts — and the pipeline then silently falls back to
 even time splitting, which looks like it worked. `selftest.py` measures the
 usable range instead of trusting a constant.
+
+---
+
+## B 站北斗解缠课程 HTML 版
+
+The actual output of `video-slides-to-deck`, kept in the repo so it can be read
+without running anything: **all 43 lectures** of UP 主 北斗解缠's 缠论
+(`BV1YK4y1M7C6`) as single-file illustrated HTML notes — images inlined as
+base64, so each file opens offline with no server and no dependencies.
+
+**[Browse the deck →](B站北斗解缠课程HTML版/README.md)** · 43 files, 230 MB total.
+
+Every section carries the keyframe for that moment plus a self-sufficient
+written summary, and links straight to the corresponding timestamp on bilibili.
+Raw subtitles are folded away behind a toggle; AI-track homophone errors are
+corrected in the prose but preserved verbatim in the subtitle block so you can
+check the reading yourself.
+
+Note these are **study notes of a course**, not investment advice — the lecturer
+makes no return claims and recommends no specific stock, and neither does the
+deck.
+
+---
+
+## About this repo
+
+Two skills, one of which has shipped a real deliverable:
+
+- [`chanlun-kmerge`](chanlun-kmerge/) — interactive K-line containment practice
+- [`video-slides-to-deck`](video-slides-to-deck/) — video → illustrated HTML notes,
+  which produced the 43-file course deck linked above
+
+Both are self-contained: `SKILL.md` plus the scripts and references they need.
